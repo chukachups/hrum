@@ -181,6 +181,32 @@ function recipeLink(p) {
   const b64 = btoa(unescape(encodeURIComponent(JSON.stringify(data)))).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
   return location.origin + location.pathname + "#recipe=" + b64;
 }
+// Общие упаковщики данных для ссылок (#norm=…)
+function packLink(obj) {
+  return btoa(unescape(encodeURIComponent(JSON.stringify(obj)))).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+}
+function unpackLink(str) {
+  let b = str.replace(/-/g, "+").replace(/_/g, "/");
+  while (b.length % 4) b += "=";
+  return JSON.parse(decodeURIComponent(escape(atob(b))));
+}
+function normLink() {
+  return location.origin + location.pathname + "#norm=" + packLink({ w: S.profile.weight, k: r0(targets().kcal), d: dayKey() });
+}
+function parseNormHash() {
+  const m = location.hash.match(/^#norm=([\w-]+)$/);
+  if (!m) return null;
+  try {
+    const d = unpackLink(m[1]);
+    const w = +d.w, k = +d.k;
+    if (!(k >= 800 && k <= 6000) || !(w >= 30 && w <= 300)) return null;
+    return { weight: w, kcal: k, date: /^\d{4}-\d\d-\d\d$/.test(d.d) ? d.d : dayKey() };
+  } catch (e) {
+    return null;
+  }
+}
+const shortDate = k => { const d = parseDay(k); return `${d.getDate()} ${MONTHS[d.getMonth()]}`; };
+
 function parseRecipeHash() {
   const m = location.hash.match(/^#recipe=([\w-]+)$/);
   if (!m) return null;
@@ -561,8 +587,9 @@ function viewProfile() {
     <div class="section-title"><h2>Второй человек</h2><span>для общих блюд</span></div>
     <button class="row-card" data-a="editPartner">
       <span class="t"><b>${S.partner ? esc(S.partner.name) : "Не указан"}</b>
-      <span>${S.partner ? `норма ${r0(S.partner.kcal)} ккал · рецепты делятся на двоих` : "укажи норму — Хрум будет делить блюда пропорционально"}</span></span>
+      <span>${S.partner ? `норма ${r0(S.partner.kcal)} ккал${S.partner.weight ? ` · вес ${fmt(S.partner.weight)} кг` : ""}${S.partner.date ? ` · от ${shortDate(S.partner.date)}` : ""}` : "укажи норму — Хрум будет делить блюда пропорционально"}</span></span>
       <span class="p">›</span></button>
+    <button class="btn ghost" data-a="shareNorm">Отправить мою норму</button>
     <div class="section-title"><h2>Оформление</h2></div>
     <div class="seg">
       <button data-a="setSkin" data-v="green" aria-pressed="${S.skin !== "cookie"}">Зелёный</button>
@@ -679,9 +706,10 @@ function openSheet(html) {
   $("#sheet").hidden = false;
   document.body.style.overflow = "hidden";
 }
-async function closeSheet() {
+// Закрывает сразу (синхронно), чтобы следующий openSheet не стёрся; камера гасится в фоне
+function closeSheet() {
   ui.scanTarget = null;
-  await stopScanner();
+  stopScanner();
   $("#sheet").hidden = true;
   $("#sheetBody").innerHTML = "";
   document.body.style.overflow = "";
@@ -800,7 +828,7 @@ function recipeInfoSheet(p) {
       <hr class="rule">
       ${r.items.map(x => `<div class="kv"><span>${esc(x.name)}</span><b>${fmt(x.grams, 0)} г</b></div>`).join("")}
     </div>
-    ${splitCard(c)}
+    ${splitCard(c, r)}
     <button class="btn" data-a="productToDiary" data-id="${p.id}">Добавить в дневник</button>
     <div class="btn-row">
       <button class="btn ghost" data-a="editProduct" data-id="${p.id}">Изменить</button>
@@ -810,19 +838,45 @@ function recipeInfoSheet(p) {
 }
 
 // Делим блюдо пропорционально нормам: кому больше калорий — тому больше грамм
-function splitCard(c) {
+// Делим пропорционально нормам. Если указаны порции — делим один совместный приём (2 порции),
+// а не всю кастрюлю: порция — это еда одного человека на один раз.
+function splitCard(c, r) {
   const partner = S.partner;
   if (!partner || !partner.kcal) {
     return `<button class="row-card dashed" data-a="editPartner">Разделить на двоих — укажи норму второго человека</button>`;
   }
   const mine = targets().kcal, share = mine / (mine + partner.kcal);
-  const g1 = c.weight * share, g2 = c.weight - g1, k = c.per100.kcal / 100;
+  const k = c.per100.kcal / 100, pct = Math.round(share * 100);
+  const mealPortions = r.portions ? Math.min(2, r.portions) : 0;
+  const base = mealPortions ? c.weight / r.portions * mealPortions : c.weight;
+  const g1 = base * share, g2 = base - g1;
+  const title = mealPortions
+    ? `На один приём вдвоём — ${mealPortions} ${plural(mealPortions, ["порция", "порции", "порций"])} из ${r.portions}, ${fmt(base, 0)} г`
+    : `Вся кастрюля, ${fmt(base, 0)} г`;
+  const meals = mealPortions && r.portions >= 2 ? Math.floor(r.portions / 2) : 0;
   return `<div class="card form split">
     <b>Разделить на двоих</b>
-    <div class="kv"><span>Тебе (${Math.round(share * 100)}%)</span><b>${fmt(g1, 0)} г · ${r0(g1 * k)} ккал</b></div>
-    <div class="kv"><span>${esc(partner.name)} (${100 - Math.round(share * 100)}%)</span><b>${fmt(g2, 0)} г · ${r0(g2 * k)} ккал</b></div>
-    <p class="muted small">Из ${fmt(c.weight, 0)} г, пропорционально нормам: ${r0(mine)} и ${r0(partner.kcal)} ккал в день.</p>
+    <span class="muted small">${title}</span>
+    <div class="kv"><span>Тебе (${pct}%)</span><b>${fmt(g1, 0)} г · ${r0(g1 * k)} ккал</b></div>
+    <div class="kv"><span>${esc(partner.name)} (${100 - pct}%)</span><b>${fmt(g2, 0)} г · ${r0(g2 * k)} ккал</b></div>
+    <p class="muted small">Пропорционально нормам: ${r0(mine)} и ${r0(partner.kcal)} ккал в день.${
+      meals > 1 ? ` Блюда хватит на ${meals} ${plural(meals, ["приём", "приёма", "приёмов"])} вдвоём.` : ""}${
+      mealPortions ? "" : " Укажи в рецепте число порций — тогда разделю один приём, а не всю кастрюлю."}</p>
   </div>`;
+}
+
+function incomingNormSheet(n) {
+  ui.incomingNorm = n;
+  openSheet(`<h2>Тебе прислали норму</h2>
+    <div class="card form">
+      <div class="kv"><span>Вес</span><b>${fmt(n.weight)} кг</b></div>
+      <div class="kv"><span>Норма</span><b>${r0(n.kcal)} ккал в день</b></div>
+      <div class="kv"><span>Обновлено</span><b>${shortDate(n.date)}</b></div>
+    </div>
+    <label class="field"><span>Чья это норма</span><input id="inName" class="input" value="${esc(S.partner?.name || "")}" placeholder="Муж"></label>
+    <p class="muted small">Сохраню как «второго человека» — по этой норме Хрум делит общие блюда на двоих.</p>
+    <button class="btn" data-a="acceptNorm">Сохранить</button>
+    <button class="btn ghost" data-a="closeSheet">Не нужно</button>`);
 }
 
 function partnerSheet() {
@@ -1184,10 +1238,35 @@ const actions = {
     toast(`Рецепт «${d.name}» добавлен`);
   },
   editPartner() { partnerSheet(); },
+  async shareNorm() {
+    const url = normLink();
+    const text = `Моя норма в Хруме: вес ${fmt(S.profile.weight)} кг, ${r0(targets().kcal)} ккал в день. Открой ссылку, чтобы обновить:`;
+    if (navigator.share) {
+      try { await navigator.share({ title: "Моя норма в Хруме", text, url }); return; }
+      catch (e) { if (e.name === "AbortError") return; }
+    }
+    try {
+      await navigator.clipboard.writeText(`${text} ${url}`);
+      toast("Ссылка скопирована — отправь её в мессенджер");
+    } catch (e) {
+      openSheet(`<h2>Ссылка с нормой</h2><p class="muted small">Скопируй и отправь в мессенджер:</p>
+        <textarea class="input" rows="4" readonly>${esc(url)}</textarea>
+        <button class="btn ghost" data-a="closeSheet">Готово</button>`);
+    }
+  },
+  acceptNorm() {
+    const n = ui.incomingNorm;
+    S.partner = { name: $("#inName").value.trim() || S.partner?.name || "Второй человек", kcal: n.kcal, weight: n.weight, date: n.date };
+    ui.incomingNorm = null;
+    save(); closeSheet(); render();
+    toast(`Норма обновлена: ${r0(n.kcal)} ккал`);
+  },
   savePartner() {
     const kcal = num($("#ptKcal").value);
     if (!kcal || kcal < 800 || kcal > 6000) { toast("Норма — от 800 до 6000 ккал"); return; }
-    S.partner = { name: $("#ptName").value.trim() || "Второй человек", kcal };
+    const same = S.partner && r0(S.partner.kcal) === r0(kcal);
+    S.partner = { name: $("#ptName").value.trim() || "Второй человек", kcal,
+      weight: same ? S.partner.weight : null, date: same ? S.partner.date : dayKey() };
     save(); closeSheet(); render(); toast("Сохранено — общие блюда теперь делятся на двоих");
   },
   clearPartner() { S.partner = null; save(); closeSheet(); render(); },
@@ -1253,7 +1332,15 @@ const actions = {
     if (bf != null) S.profile.bodyFat = bf;
     S.weights[dayKey()] = { w, bf: S.profile.bodyFat };
     save(); closeSheet(); render();
-    toast(`Записал. Норма: ${r0(targets().kcal)} ккал`);
+    if (S.partner) {
+      openSheet(`<h2>Вес записан</h2>
+        <p>Новая норма: <b>${r0(targets().kcal)} ккал</b> в день.</p>
+        <p class="muted small">Отправь её ${esc(S.partner.name)}, чтобы общие блюда делились по-новому.</p>
+        <button class="btn" data-a="shareNorm">Отправить мою норму</button>
+        <button class="btn ghost" data-a="closeSheet">Потом</button>`);
+    } else {
+      toast(`Записал. Норма: ${r0(targets().kcal)} ккал`);
+    }
   },
   editProfile() { ui.view = "setup"; render(); window.scrollTo(0, 0); },
   exportData() {
@@ -1355,6 +1442,12 @@ function render() {
   $("#tabs").hidden = ui.view === "setup";
   renderTabs();
   mount?.();
+  // ссылка «Отправить мою норму»
+  if (S.profile && location.hash.startsWith("#norm=") && $("#sheet").hidden) {
+    const n = parseNormHash();
+    history.replaceState(null, "", location.pathname);
+    if (n) incomingNormSheet(n); else toast("Ссылка с нормой повреждена");
+  }
   // ссылка «Поделиться рецептом»
   if (S.profile && location.hash.startsWith("#recipe=") && $("#sheet").hidden) {
     const data = parseRecipeHash();
@@ -1367,6 +1460,10 @@ window.addEventListener("beforeinstallprompt", e => {
   e.preventDefault();
   ui.installPrompt = e;
   if ($("#sheet").hidden && (ui.view === "diary" || ui.view === "setup")) render();
+});
+// ссылка с рецептом или нормой открыта, когда Хрум уже был открыт
+window.addEventListener("hashchange", () => {
+  if (/^#(recipe|norm)=/.test(location.hash)) { closeSheet(); render(); }
 });
 window.addEventListener("appinstalled", () => { ui.installPrompt = null; toast("Хрум установлен!"); });
 // Смена даты, пока приложение открыто в фоне

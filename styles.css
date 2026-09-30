@@ -220,7 +220,7 @@ h2 { font-weight: 500; font-size: 17px; margin: 0; }
 .tabs .scan svg { width: 26px; height: 26px; }
 
 .toast {
-  position: fixed; left: 50%; bottom: calc(90px + env(safe-area-inset-bottom, 0px)); transform: translateX(-50%); z-index: 30;
+  position: fixed; left: 50%; top: calc(12px + env(safe-area-inset-top, 0px)); transform: translateX(-50%); z-index: 30; box-shadow: 0 8px 24px -10px rgba(0,0,0,.5);
   background: var(--ink); color: var(--bg); padding: 10px 16px; border-radius: 12px; font-size: 14px; max-width: calc(100% - 32px);
 }
 
