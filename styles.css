@@ -208,6 +208,29 @@ h2 { font-weight: 500; font-size: 17px; margin: 0; }
   background: var(--ink); color: var(--bg); padding: 10px 16px; border-radius: 12px; font-size: 14px; max-width: calc(100% - 32px);
 }
 
+/* ---------- Подсказка об установке ---------- */
+.install { display: grid; grid-template-columns: 44px 1fr auto; gap: 10px 12px; align-items: center; border: 1.5px solid var(--accent-soft); }
+.install img { width: 44px; height: 44px; border-radius: 12px; }
+.install b { display: block; font-weight: 600; }
+.install span { font-size: 13px; color: var(--muted); }
+.install .close { border: 0; background: none; color: var(--muted); font-size: 24px; line-height: 1; width: 32px; height: 32px; align-self: start; }
+.install .btn, .install-warn { grid-column: 1 / -1; }
+.install .btn { padding: 11px 16px; font-size: 15px; }
+.install-warn { margin: 0; font-size: 13px; background: var(--accent-soft); color: var(--ink); border-radius: 10px; padding: 9px 11px; }
+.steps { margin: 0; padding-left: 22px; display: grid; gap: 8px; }
+#sheetBody h3 { margin: 4px 0 0; font-size: 15px; }
+
+/* ---------- Подпись автора ---------- */
+.credit { display: flex; align-items: center; justify-content: center; gap: 10px; padding: 22px 0 6px; color: var(--muted); font-size: 12.5px; }
+.credit b { display: block; color: var(--ink); font-weight: 600; font-size: 13.5px; }
+.author {
+  border: 0; padding: 6px 9px; border-radius: 14px; flex: none;
+  background: radial-gradient(circle at 50% 45%, #2A2520 0%, #0E0C0A 75%);
+  box-shadow: inset 0 0 0 1px rgba(255, 190, 120, .18);
+}
+.author img { height: 48px; width: auto; display: block; }
+.author:active img { transform: scale(.94); }
+
 /* ---------- Графики ---------- */
 .chart svg { width: 100%; height: auto; display: block; }
 .stats { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; }

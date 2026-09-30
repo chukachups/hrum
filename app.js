@@ -64,6 +64,42 @@ function toast(text) {
   toastTimer = setTimeout(() => { t.hidden = true; }, 2600);
 }
 
+/* ================= Платформа ================= */
+
+const IS_STANDALONE = matchMedia("(display-mode: standalone)").matches || navigator.standalone === true;
+const IS_IOS = /iPhone|iPad|iPod/.test(navigator.userAgent) || (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1);
+const IS_ANDROID = /Android/i.test(navigator.userAgent);
+const HIDE_INSTALL_KEY = "hrum-install-hidden";
+
+function installHidden() {
+  if (IS_STANDALONE) return true;
+  try { return Date.now() - Number(localStorage.getItem(HIDE_INSTALL_KEY) || 0) < 3 * 864e5; }
+  catch (e) { return false; }
+}
+
+// Карточка «Поселите Хрум на главный экран» — пока приложение открыто в браузере
+function installCard(force = false) {
+  if (IS_STANDALONE || (!force && installHidden())) return "";
+  const iosWarn = IS_IOS && !S.profile
+    ? `<p class="install-warn">На iPhone сначала добавь Хрум на экран «Домой» и открой с иконки, а потом заполняй профиль — у иконки своя память, отдельная от Safari.</p>`
+    : "";
+  return `<section class="card install">
+    <img src="icons/icon-192.png" alt="">
+    <div><b>Поселите Хрум на главный экран</b><span>Будет открываться с иконки-печеньки, на весь экран и без интернета</span></div>
+    ${force ? "" : `<button class="close" data-a="hideInstall" aria-label="Скрыть подсказку">×</button>`}
+    ${iosWarn}
+    <button class="btn" data-a="install">${ui.installPrompt ? "Установить" : "Как это сделать"}</button>
+  </section>`;
+}
+
+// Подпись автора внизу каждого экрана
+function footer() {
+  return `<footer class="credit">
+    <button class="author" data-a="author" aria-label="Об авторе" aria-expanded="false"><img src="icons/author.png" alt="Логотип автора"></button>
+    <div><b id="authorName" hidden>Чукин Владимир</b><span>Сделано в 2026</span></div>
+  </footer>`;
+}
+
 /* ================= Хранилище ================= */
 
 function blank() { return { profile: null, products: [], entries: {}, workouts: {}, weights: {}, recent: [], seq: 1 }; }
@@ -238,6 +274,7 @@ function viewDiary() {
     </div>
     <div class="brand"><img src="icons/icon-192.png" alt="">хрум</div>
   </header>
+  ${installCard()}
 
   <section class="card hero" aria-label="Итог дня">
     <div class="ring-row">
@@ -468,6 +505,7 @@ function viewSetup() {
   const seg = (group, val, label) => `<button type="button" data-a="pick" data-val="${val}" aria-pressed="${p[group] === val}">${label}</button>`;
   const opt = (val, title, sub, cur) => `<button type="button" class="option" data-a="pick" data-val="${val}" aria-pressed="${cur === val}"><b>${title}</b><span>${sub}</span></button>`;
   return `<header class="top"><div class="brand" style="font-size:22px"><img src="icons/icon-192.png" alt="" style="width:34px;height:34px">хрум</div></header>
+  ${S.profile ? "" : installCard(IS_IOS)}
   ${S.profile ? "<h1>Профиль</h1>" : `<div class="card"><h2>Привет!</h2><p class="muted">Хрум считает калории от сухой массы тела — это точнее обычных калькуляторов. Заполни профиль, и я посчитаю твою норму.</p></div>`}
   <form id="setupForm" class="form" novalidate>
     <div class="field"><span>Пол</span><div class="seg" id="fSex">${seg("sex", "m", "Мужской")}${seg("sex", "f", "Женский")}</div></div>
@@ -877,14 +915,37 @@ const actions = {
   async install() {
     if (ui.installPrompt) {
       ui.installPrompt.prompt();
+      const { outcome } = await ui.installPrompt.userChoice.catch(() => ({}));
       ui.installPrompt = null;
+      if (outcome === "accepted") toast("Хрум! Ищи печеньку на главном экране");
       return;
     }
-    openSheet(`<h2>На главный экран</h2>
-      <p><b>iPhone (Safari):</b> кнопка «Поделиться» внизу → «На экран „Домой“».</p>
-      <p><b>Android (Chrome):</b> меню ⋮ справа сверху → «Добавить на главный экран» или «Установить приложение».</p>
-      <p class="muted small">После этого Хрум открывается с иконки, на весь экран и без интернета.</p>
+    const ios = `<h3>iPhone</h3>
+      <ol class="steps">
+        <li>Открой эту страницу в <b>Safari</b>.</li>
+        <li>Нажми «Поделиться» — квадрат со стрелкой вверх внизу экрана.</li>
+        <li>Пролистай вниз и выбери <b>«На экран „Домой“»</b>, затем «Добавить».</li>
+        <li>Открой Хрум с новой иконки-печеньки и заполни профиль там.</li>
+      </ol>`;
+    const android = `<h3>Android</h3>
+      <ol class="steps">
+        <li>В Chrome нажми меню <b>⋮</b> справа сверху.</li>
+        <li>Выбери <b>«Установить приложение»</b> или «Добавить на главный экран» → «Установить».</li>
+        <li>Если есть только <b>«Добавить ярлык»</b> — тоже подойдёт, просто сверху останется строка браузера.</li>
+      </ol>`;
+    openSheet(`<h2>Хрум на главный экран</h2>
+      ${IS_IOS ? ios : IS_ANDROID ? android : ios + android}
+      <p class="muted small">Данные и так хранятся на телефоне — установка просто делает Хрум похожим на обычное приложение.</p>
       <button class="btn ghost" data-a="closeSheet">Понятно</button>`);
+  },
+  hideInstall() {
+    try { localStorage.setItem(HIDE_INSTALL_KEY, String(Date.now())); } catch (e) { /* ignore */ }
+    render();
+  },
+  author(el) {
+    const name = $("#authorName");
+    name.hidden = !name.hidden;
+    el.setAttribute("aria-expanded", !name.hidden);
   },
 };
 
@@ -913,13 +974,18 @@ function render() {
   const [view, mount] = VIEWS[ui.view];
   const root = $("#view");
   root.className = "app" + (ui.view === "setup" ? " plain" : "");
-  root.innerHTML = view();
+  root.innerHTML = view() + footer();
   $("#tabs").hidden = ui.view === "setup";
   renderTabs();
   mount?.();
 }
 
-window.addEventListener("beforeinstallprompt", e => { e.preventDefault(); ui.installPrompt = e; });
+window.addEventListener("beforeinstallprompt", e => {
+  e.preventDefault();
+  ui.installPrompt = e;
+  if ($("#sheet").hidden && (ui.view === "diary" || ui.view === "setup")) render();
+});
+window.addEventListener("appinstalled", () => { ui.installPrompt = null; toast("Хрум установлен!"); });
 // Смена даты, пока приложение открыто в фоне
 document.addEventListener("visibilitychange", () => {
   if (document.visibilityState !== "visible") return;
