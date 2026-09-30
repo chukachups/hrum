@@ -96,7 +96,7 @@ function installCard(force = false) {
 function footer() {
   return `<footer class="credit">
     <button class="author" data-a="author" aria-label="Об авторе" aria-expanded="false"><img src="icons/author.png" alt="Логотип автора"></button>
-    <div><b id="authorName" hidden>Чукин Владимир</b><span>Сделано в 2026</span></div>
+    <div><b id="authorName" hidden>Чукин Владимир</b><span>© 2026</span></div>
   </footer>`;
 }
 
@@ -934,7 +934,7 @@ const actions = {
         <li>Если есть только <b>«Добавить ярлык»</b> — тоже подойдёт, просто сверху останется строка браузера.</li>
       </ol>`;
     openSheet(`<h2>Хрум на главный экран</h2>
-      ${IS_IOS ? ios : IS_ANDROID ? android : ios + android}
+      ${IS_ANDROID ? android + ios : ios + android}
       <p class="muted small">Данные и так хранятся на телефоне — установка просто делает Хрум похожим на обычное приложение.</p>
       <button class="btn ghost" data-a="closeSheet">Понятно</button>`);
   },
