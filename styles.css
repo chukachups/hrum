@@ -28,6 +28,22 @@
   }
 }
 
+/* Оформление «Печенька» */
+:root[data-skin="cookie"] {
+  --bg: #EAF1E1; --surface: #FFFDF8; --ink: #2E2419; --muted: #7A6A58; --line: #EADCC6;
+  --accent: #6B3F22; --accent-ink: #FFF6E8; --accent-soft: #F3E3C8;
+  --protein: #D9573B; --fat: #E2A034; --carbs: #3E8E4E; --track: #F0E6D6; --danger: #C23B2A;
+  --display: "Comfortaa", "Nunito", system-ui, sans-serif;
+  --body: "Nunito", "Segoe UI", system-ui, sans-serif;
+}
+@media (prefers-color-scheme: dark) {
+  :root[data-skin="cookie"] {
+    --bg: #17120D; --surface: #221A13; --ink: #F3E9DC; --muted: #B3A08A; --line: #3A2E22;
+    --accent: #E7B46C; --accent-ink: #1B140E; --accent-soft: #3A2B1C;
+    --protein: #F07A5E; --fat: #F0BA4A; --carbs: #6FBF7C; --track: #33271B; --danger: #FF6B57;
+  }
+}
+
 * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
 html, body { margin: 0; }
 body {
@@ -231,6 +247,23 @@ h2 { font-weight: 500; font-size: 17px; margin: 0; }
 .author img { height: 48px; width: auto; display: block; }
 .author:active img { transform: scale(.94); }
 
+/* ---------- Печенька ---------- */
+.cookie { width: 150px; height: 150px; }
+.cookie svg { width: 100%; height: 100%; display: block; overflow: visible; }
+.balance .big { font-family: var(--display); font-weight: 700; font-size: 32px; line-height: 1; }
+.balance .big.over { color: var(--danger); }
+.balance .cap { font-size: 13px; color: var(--muted); margin: 4px 0 2px; }
+.cookie-cap { margin: 0; font-size: 13px; color: var(--muted); text-align: center; }
+[data-skin="cookie"] .item, [data-skin="cookie"] .empty { border-top-style: dashed; }
+[data-skin="cookie"] .card, [data-skin="cookie"] .meal { border-radius: 24px; }
+[data-skin="cookie"] .plus { color: var(--carbs); }
+[data-skin="cookie"] .macro .name { text-transform: none; letter-spacing: 0; font-weight: 600; }
+@media (prefers-reduced-motion: no-preference) {
+  .cookie svg { animation: crunch .5s cubic-bezier(.2, .8, .3, 1.3); }
+  @keyframes crunch { 0% { transform: scale(.94) rotate(-4deg); } 100% { transform: none; } }
+}
+.btn-row .btn { padding-inline: 8px; font-size: 15px; }
+
 /* ---------- Графики ---------- */
 .chart svg { width: 100%; height: auto; display: block; }
 .stats { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; }
@@ -242,3 +275,5 @@ h2 { font-weight: 500; font-size: 17px; margin: 0; }
   .balance { width: 100%; }
   .macros { gap: 8px; }
 }
+
+.meal > .item:first-child, .meal > .empty:first-child { border-top: 0; }

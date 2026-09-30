@@ -159,6 +159,42 @@ const norm = s => String(s).toLowerCase().replace(/ё/g, "е").trim();
 const stem = w => (w.length > 4 ? w.slice(0, Math.max(3, w.length - 2)) : w);
 const allProducts = () => [...S.products, ...BASE_PRODUCTS];
 const findProduct = id => allProducts().find(p => p.id === id);
+// Рецепт: сумма ингредиентов (сырой вес), делённая на вес готового блюда
+function recipeCalc(r) {
+  const total = { kcal: 0, p: 0, f: 0, c: 0 };
+  let raw = 0;
+  for (const it of r.items) {
+    raw += it.grams;
+    for (const k in total) total[k] += it[k] * it.grams / 100;
+  }
+  const weight = r.cooked || raw;
+  const per100 = {};
+  for (const k in total) per100[k] = weight ? Math.round(total[k] / weight * 1000) / 10 : 0;
+  return { total, raw, weight, per100 };
+}
+const recipeWeight = r => recipeCalc(r).weight;
+
+function recipeLink(p) {
+  const data = { n: p.name, c: p.recipe.cooked || 0, s: p.recipe.portions || 0,
+    i: p.recipe.items.map(x => [x.name, x.grams, x.kcal, x.p, x.f, x.c]) };
+  const b64 = btoa(unescape(encodeURIComponent(JSON.stringify(data)))).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+  return location.origin + location.pathname + "#recipe=" + b64;
+}
+function parseRecipeHash() {
+  const m = location.hash.match(/^#recipe=([\w-]+)$/);
+  if (!m) return null;
+  try {
+    let b = m[1].replace(/-/g, "+").replace(/_/g, "/");
+    while (b.length % 4) b += "=";
+    const d = JSON.parse(decodeURIComponent(escape(atob(b))));
+    const items = d.i.map(([name, grams, kcal, pp, f, c]) => ({ name: String(name).slice(0, 120), grams: +grams, kcal: +kcal, p: +pp, f: +f, c: +c }));
+    if (!items.length || items.some(x => !(x.grams > 0) || ![x.kcal, x.p, x.f, x.c].every(Number.isFinite))) return null;
+    return { name: String(d.n || "Рецепт").slice(0, 120), recipe: { items, cooked: +d.c || null, portions: +d.s || null } };
+  } catch (e) {
+    return null;
+  }
+}
+
 const kbju = p => `${r0(p.kcal)} ккал · Б ${fmt(p.p)} · Ж ${fmt(p.f)} · У ${fmt(p.c)}`;
 
 function searchProducts(q) {
@@ -277,6 +313,7 @@ function viewDiary() {
   ${installCard()}
 
   <section class="card hero" aria-label="Итог дня">
+    ${S.skin === "cookie" ? cookieBlock(d) : `
     <div class="ring-row">
       <div class="ring ${over ? "over" : ""}">
         <svg viewBox="0 0 120 120" aria-hidden="true">
@@ -294,6 +331,7 @@ function viewDiary() {
         <div class="kv"><span>Лимит дня</span><b>${r0(limit)}</b></div>
       </div>
     </div>
+    `}
     <div class="macros">
       ${macro("Белки", eaten.p, t.p, "--protein")}
       ${macro("Жиры", eaten.f, t.f, "--fat")}
@@ -315,6 +353,51 @@ function viewDiary() {
 
   <div class="section-title"><h2>Вес</h2><span>последние записи</span></div>
   ${weightCard()}`;
+}
+
+/* Печенька: целая = лимит дня, 12 укусов */
+function cookieSvg(bites) {
+  const done = bites >= 12;
+  let holes = "", crumbs = "";
+  for (let i = 0; i < Math.min(bites, 12); i++) {
+    const a = (-90 + 15 + i * 30) * Math.PI / 180;
+    holes += `<circle cx="${(80 + 74 * Math.cos(a)).toFixed(1)}" cy="${(80 + 74 * Math.sin(a)).toFixed(1)}" r="21" fill="#000"/>`;
+    if (i % 2 === 0) {
+      const r = 94 + (i % 4) * 2;
+      crumbs += `<circle cx="${(80 + r * Math.cos(a + .2)).toFixed(1)}" cy="${(80 + r * Math.sin(a + .2)).toFixed(1)}" r="${2 + (i % 3)}" fill="#D9A15A"/>`;
+    }
+  }
+  if (done) {
+    crumbs = [[62, 118, 5], [80, 124, 7], [98, 119, 5], [72, 110, 3], [90, 111, 4], [54, 126, 3], [106, 127, 3]]
+      .map(([x, y, r]) => `<circle cx="${x}" cy="${y}" r="${r}" fill="#D9A15A"/>`).join("");
+  }
+  const chips = [[52, 58], [96, 46], [70, 92], [108, 96], [44, 104], [86, 124], [120, 70], [62, 36]]
+    .map(([x, y], i) => `<ellipse cx="${x}" cy="${y}" rx="${6 + i % 3}" ry="${5 + i % 2}" fill="#6B3F22" transform="rotate(${i * 23} ${x} ${y})"/>`).join("");
+  return `<svg viewBox="-20 -20 200 200" aria-hidden="true">
+    <defs><mask id="cbite"><rect x="-20" y="-20" width="200" height="200" fill="#fff"/>${holes}</mask></defs>
+    ${done ? "" : `<g mask="url(#cbite)"><circle cx="80" cy="80" r="72" fill="#E7B46C"/>
+      <circle cx="80" cy="80" r="72" fill="none" stroke="#C98B45" stroke-width="5"/>${chips}</g>`}${crumbs}</svg>`;
+}
+
+function cookieBlock(d) {
+  const { t, eaten, burned, limit } = d;
+  const left = limit - eaten.kcal, over = left < 0;
+  const bites = over ? 12 : Math.min(12, Math.round(eaten.kcal / limit * 12));
+  const bite = r0(limit / 12);
+  const cap = over || bites >= 12 ? "Печенька на сегодня съедена — остались крошки"
+    : bites === 0 ? `Целая печенька — это лимит дня. 1 укус ≈ ${bite} ккал`
+    : `Откушено ${bites} ${plural(bites, ["укус", "укуса", "укусов"])} из 12 · 1 укус ≈ ${bite} ккал`;
+  return `<div class="ring-row">
+      <div class="cookie" role="img" aria-label="${cap}">${cookieSvg(bites)}</div>
+      <div class="balance">
+        <div><div class="big ${over ? "over" : ""}">${r0(Math.abs(left))}</div><div class="cap">${over ? "ккал сверх лимита" : "ккал ещё можно съесть"}</div></div>
+        <div class="kv"><span>Норма</span><b>${r0(t.kcal)}</b></div>
+        <div class="kv"><span>Тренировки</span><b class="plus">+${r0(burned)}</b></div>
+        <div class="kv"><span>Откушено</span><b>${r0(eaten.kcal)}</b></div>
+      </div>
+    </div>
+    <p class="cookie-cap">${cap}</p>
+`;
 }
 
 function weightSeries(limit) {
@@ -351,7 +434,8 @@ function viewProducts() {
     <input id="psearch" class="input" type="search" placeholder="Поиск по названию" autocomplete="off">
     <div class="btn-row">
       <button class="btn ghost" data-a="scan">Штрихкод</button>
-      <button class="btn ghost" data-a="newProduct">+ Новый продукт</button>
+      <button class="btn ghost" data-a="newProduct">+ Продукт</button>
+      <button class="btn ghost" data-a="newRecipe">+ Рецепт</button>
     </div>
     <div id="plist" class="list"></div>`;
 }
@@ -367,7 +451,7 @@ function productRows(list, action, q) {
       <button class="btn ghost" data-a="newProduct" data-name="${esc(q)}">Создать продукт «${esc(q)}»</button>`;
   }
   return list.map(p => `<button class="prod" data-a="${action}" data-id="${p.id}">
-      <span class="n">${esc(p.name)}${p.id[0] !== "b" ? `<span class="tag">${p.barcode ? "штрихкод" : "мой"}</span>` : ""}</span>
+      <span class="n">${esc(p.name)}${p.id[0] !== "b" ? `<span class="tag">${p.recipe ? "рецепт" : p.barcode ? "штрихкод" : "мой"}</span>` : ""}</span>
       <span class="k">${r0(p.kcal)} ккал</span>
       <span class="m">на 100 г · Б ${fmt(p.p)} · Ж ${fmt(p.f)} · У ${fmt(p.c)}</span></button>`).join("");
 }
@@ -471,6 +555,11 @@ function viewProfile() {
     </details>
     <button class="btn" data-a="addWeight">Записать вес</button>
     <button class="btn ghost" data-a="editProfile">Изменить профиль</button>
+    <div class="section-title"><h2>Оформление</h2></div>
+    <div class="seg">
+      <button data-a="setSkin" data-v="green" aria-pressed="${S.skin !== "cookie"}">Зелёный</button>
+      <button data-a="setSkin" data-v="cookie" aria-pressed="${S.skin === "cookie"}">Печенька</button>
+    </div>
     <div class="section-title"><h2>Данные</h2></div>
     <p class="note">Всё хранится только на этом телефоне. Раз в пару недель сохраняй копию — пригодится при смене телефона.</p>
     <div class="btn-row">
@@ -596,7 +685,8 @@ function addFoodSheet(meal) {
     <input id="fsearch" class="input" type="search" placeholder="Что съел? Например, гречка" autocomplete="off">
     <div class="btn-row">
       <button class="btn ghost" data-a="scan">Штрихкод</button>
-      <button class="btn ghost" data-a="newProduct">+ Новый продукт</button>
+      <button class="btn ghost" data-a="newProduct">+ Продукт</button>
+      <button class="btn ghost" data-a="newRecipe">+ Рецепт</button>
     </div>
     <div id="flabel" class="muted small"></div>
     <div id="flist" class="list"></div>`);
@@ -614,11 +704,14 @@ function gramsSheet(p, meal, entry) {
   const per100 = entry
     ? { id: entry.pid, name: entry.name, kcal: entry.kcal / entry.grams * 100, p: entry.p / entry.grams * 100, f: entry.f / entry.grams * 100, c: entry.c / entry.grams * 100 }
     : p;
-  const g0 = entry ? entry.grams : 100;
+  const portion = !entry && p.recipe && p.recipe.portions ? recipeWeight(p.recipe) / p.recipe.portions : 0;
+  const g0 = entry ? entry.grams : portion || 100;
   ui.gctx = { p: per100, entry };
   openSheet(`<div><h2>${esc(per100.name)}</h2><p class="muted small">На 100 г: ${kbju(per100)}</p></div>
     <label class="field"><span>Сколько грамм</span><input id="grams" class="input" inputmode="decimal" value="${fmt(g0, 0)}"></label>
-    <div class="chips">${[30, 50, 100, 150, 200, 250, 300].map(g => `<button class="chip" data-a="setGrams" data-g="${g}">${g}</button>`).join("")}</div>
+    <div class="chips">${portion
+      ? [[0.5, "½ порции"], [1, "1 порция"], [1.5, "1½ порции"], [2, "2 порции"]].map(([k, l]) => `<button class="chip" data-a="setGrams" data-g="${r0(portion * k)}">${l} · ${r0(portion * k)} г</button>`).join("")
+      : [30, 50, 100, 150, 200, 250, 300].map(g => `<button class="chip" data-a="setGrams" data-g="${g}">${g}</button>`).join("")}</div>
     <div class="seg" id="mealSeg">${MEALS.map(([k, t]) => `<button data-a="pick" data-val="${k}" aria-pressed="${k === meal}">${t}</button>`).join("")}</div>
     <div class="card preview" id="gprev"></div>
     <button class="btn" data-a="saveGrams">${entry ? "Сохранить" : "Добавить"}</button>
@@ -676,11 +769,112 @@ function productFormSheet({ barcode = null, name = "", edit = null, note = "" } 
 }
 
 function productSheet(p) {
+  if (p.recipe) return recipeInfoSheet(p);
   const mine = p.id[0] !== "b";
   openSheet(`<div><h2>${esc(p.name)}</h2><p class="muted small">На 100 г: ${kbju(p)}${p.barcode ? `<br>Штрихкод ${esc(p.barcode)}` : ""}</p></div>
     <button class="btn" data-a="productToDiary" data-id="${p.id}">Добавить в дневник</button>
     ${mine ? `<div class="btn-row"><button class="btn ghost" data-a="editProduct" data-id="${p.id}">Изменить</button>
       <button class="btn danger" data-a="deleteProduct" data-id="${p.id}">Удалить</button></div>` : `<p class="muted small">Продукт из стартовой базы.</p>`}`);
+}
+
+/* ================= Рецепты ================= */
+
+function recipeInfoSheet(p) {
+  const r = p.recipe, c = recipeCalc(r);
+  const portion = r.portions ? c.weight / r.portions : 0;
+  openSheet(`<div><h2>${esc(p.name)}</h2><p class="muted small">На 100 г: ${kbju(c.per100)}</p></div>
+    <div class="card form">
+      <div class="kv"><span>Всё блюдо, ${fmt(c.weight, 0)} г${r.cooked ? " (готовое)" : ""}</span><b>${r0(c.total.kcal)} ккал</b></div>
+      ${portion ? `<div class="kv"><span>1 порция из ${r.portions}, ${fmt(portion, 0)} г</span><b>${r0(c.per100.kcal * portion / 100)} ккал</b></div>` : ""}
+      <hr class="rule">
+      ${r.items.map(x => `<div class="kv"><span>${esc(x.name)}</span><b>${fmt(x.grams, 0)} г</b></div>`).join("")}
+    </div>
+    <button class="btn" data-a="productToDiary" data-id="${p.id}">Добавить в дневник</button>
+    <div class="btn-row">
+      <button class="btn ghost" data-a="editProduct" data-id="${p.id}">Изменить</button>
+      <button class="btn ghost" data-a="shareRecipe" data-id="${p.id}">Поделиться</button>
+    </div>
+    <button class="btn danger" data-a="deleteProduct" data-id="${p.id}">Удалить рецепт</button>`);
+}
+
+function openRecipeEditor(p) {
+  ui.rd = p
+    ? { id: p.id, name: p.name, items: p.recipe.items.map(x => ({ ...x })), cooked: p.recipe.cooked, portions: p.recipe.portions }
+    : { id: null, name: "", items: [], cooked: null, portions: null };
+  recipeSheet();
+}
+
+function syncDraft() {
+  if (!$("#rName")) return;
+  ui.rd.name = $("#rName").value.trim();
+  ui.rd.cooked = num($("#rCooked").value) || null;
+  ui.rd.portions = Math.round(num($("#rPortions").value) || 0) || null;
+}
+
+function recipeSheet() {
+  const rd = ui.rd;
+  const rows = rd.items.length
+    ? rd.items.map((x, i) => `<button class="item" data-a="rIngEdit" data-i="${i}">
+        <span class="n">${esc(x.name)}</span><span class="k">${r0(x.kcal * x.grams / 100)}</span>
+        <span class="g">${fmt(x.grams, 0)} г</span><span class="m">ккал</span></button>`).join("")
+    : `<div class="empty">Добавь продукты, из которых готовится блюдо</div>`;
+  openSheet(`<h2>${rd.id ? "Изменить рецепт" : "Новый рецепт"}</h2>
+    <label class="field"><span>Название блюда</span><input id="rName" class="input" value="${esc(rd.name)}" placeholder="Борщ как у Ани"></label>
+    <div class="section-title"><h2>Ингредиенты</h2><span>сырыми, в граммах</span></div>
+    <div class="meal">${rows}</div>
+    <button class="btn ghost" data-a="rIngAdd">+ Ингредиент</button>
+    <div class="grid2">
+      <label class="field"><span>Вес готового блюда, г</span><input id="rCooked" class="input" inputmode="decimal" value="${rd.cooked ?? ""}" placeholder="не обязательно"></label>
+      <label class="field"><span>Сколько порций</span><input id="rPortions" class="input" inputmode="numeric" value="${rd.portions ?? ""}" placeholder="не обязательно"></label>
+    </div>
+    <p class="note">Взвесь готовое блюдо без кастрюли — так учтётся выкипевшая или впитанная вода. Если не взвешивать, считаю по весу сырых продуктов.</p>
+    <div class="card preview" id="rSum"></div>
+    <p id="rErr" class="note" style="color:var(--danger)" hidden></p>
+    <button class="btn" data-a="rSave">Сохранить рецепт</button>`);
+  const upd = () => {
+    syncDraft();
+    if (!rd.items.length) { $("#rSum").innerHTML = `<span class="muted small">Здесь появится КБЖУ блюда</span>`; return; }
+    const c = recipeCalc(rd);
+    const portion = rd.portions ? `<span class="muted small">1 порция ≈ ${fmt(c.weight / rd.portions, 0)} г, ${r0(c.per100.kcal * c.weight / rd.portions / 100)} ккал</span>` : "";
+    $("#rSum").innerHTML = `<span><b>${r0(c.per100.kcal)}</b> ккал на 100 г</span><span>Б ${fmt(c.per100.p)}</span><span>Ж ${fmt(c.per100.f)}</span><span>У ${fmt(c.per100.c)}</span>${portion}`;
+  };
+  ["#rCooked", "#rPortions"].forEach(id => $(id).addEventListener("input", upd));
+  upd();
+}
+
+function recipeIngSearch() {
+  openSheet(`<h2>Ингредиент</h2>
+    <input id="isearch" class="input" type="search" placeholder="Например, свёкла" autocomplete="off">
+    <button class="btn ghost" data-a="rBack">Назад к рецепту</button>
+    <div id="ilist" class="list"></div>`);
+  const inp = $("#isearch");
+  const draw = () => {
+    const list = searchProducts(inp.value).filter(x => x.id !== ui.rd.id).slice(0, 60);
+    $("#ilist").innerHTML = list.length ? productRows(list, "rIngPick", inp.value)
+      : `<p class="muted">Не нашёл «${esc(inp.value)}». Добавь его через «+ Продукт» на вкладке «Продукты», потом вернись к рецепту.</p>`;
+  };
+  inp.addEventListener("input", draw);
+  draw();
+}
+
+function recipeIngGrams(item, idx) {
+  ui.rIng = { item, idx };
+  openSheet(`<div><h2>${esc(item.name)}</h2><p class="muted small">На 100 г: ${kbju(item)}</p></div>
+    <label class="field"><span>Сколько грамм в рецепте (сырыми)</span>
+      <input id="igrams" class="input" inputmode="decimal" value="${idx != null ? fmt(item.grams, 0) : ""}" placeholder="например, 500"></label>
+    <button class="btn" data-a="rIngSave">${idx != null ? "Сохранить" : "Добавить в рецепт"}</button>
+    ${idx != null ? `<button class="btn danger" data-a="rIngDelete">Убрать из рецепта</button>` : ""}
+    <button class="btn ghost" data-a="rBack">Назад к рецепту</button>`);
+}
+
+function incomingRecipeSheet(data) {
+  const c = recipeCalc(data.recipe);
+  openSheet(`<h2>Тебе прислали рецепт</h2>
+    <div><b>${esc(data.name)}</b><p class="muted small">На 100 г: ${kbju(c.per100)}</p></div>
+    <div class="card form">${data.recipe.items.map(x => `<div class="kv"><span>${esc(x.name)}</span><b>${fmt(x.grams, 0)} г</b></div>`).join("")}</div>
+    <button class="btn" data-a="importRecipe">Добавить себе</button>
+    <button class="btn ghost" data-a="closeSheet">Не нужно</button>`);
+  ui.incoming = data;
 }
 
 function workoutSheet() {
@@ -835,7 +1029,77 @@ const actions = {
     render();
     gramsSheet(findProduct(el.dataset.id), ui.addMeal);
   },
-  editProduct(el) { ui.addMeal = null; productFormSheet({ edit: findProduct(el.dataset.id) }); },
+  editProduct(el) {
+    const p = findProduct(el.dataset.id);
+    ui.addMeal = null;
+    if (p.recipe) openRecipeEditor(p); else productFormSheet({ edit: p });
+  },
+  newRecipe() {
+    if ($("#sheet").hidden) ui.addMeal = null;
+    openRecipeEditor(null);
+  },
+  rIngAdd() { syncDraft(); recipeIngSearch(); },
+  rIngPick(el) {
+    const p = findProduct(el.dataset.id);
+    const per = p.recipe ? recipeCalc(p.recipe).per100 : p;
+    recipeIngGrams({ name: p.name, kcal: per.kcal, p: per.p, f: per.f, c: per.c, grams: 0 }, null);
+  },
+  rIngEdit(el) { syncDraft(); const i = +el.dataset.i; recipeIngGrams(ui.rd.items[i], i); },
+  rIngSave() {
+    const g = num($("#igrams").value);
+    if (!g || g <= 0 || g > 20000) { toast("Укажи граммы"); return; }
+    const { item, idx } = ui.rIng;
+    if (idx != null) ui.rd.items[idx].grams = g;
+    else ui.rd.items.push({ ...item, grams: g });
+    recipeSheet();
+  },
+  rIngDelete() { ui.rd.items.splice(ui.rIng.idx, 1); recipeSheet(); },
+  rBack() { recipeSheet(); },
+  rSave() {
+    syncDraft();
+    const rd = ui.rd;
+    const bad = m => { const el = $("#rErr"); el.textContent = m; el.hidden = false; };
+    if (!rd.name) return bad("Назови блюдо.");
+    if (!rd.items.length) return bad("Добавь хотя бы один ингредиент.");
+    const c = recipeCalc(rd);
+    if (rd.cooked && rd.cooked < c.raw * 0.2) return bad("Вес готового блюда слишком маленький — проверь число.");
+    const recipe = { items: rd.items, cooked: rd.cooked, portions: rd.portions };
+    let prod;
+    if (rd.id) {
+      prod = Object.assign(findProduct(rd.id), { name: rd.name, ...c.per100, recipe });
+    } else {
+      prod = { id: "u" + uid(), name: rd.name, ...c.per100, recipe };
+      S.products.unshift(prod);
+    }
+    save();
+    if (ui.addMeal && !rd.id) { gramsSheet(prod, ui.addMeal); return; }
+    closeSheet(); render(); toast("Рецепт сохранён");
+  },
+  async shareRecipe(el) {
+    const p = findProduct(el.dataset.id);
+    const url = recipeLink(p);
+    const text = `Рецепт «${p.name}» для Хрума`;
+    if (navigator.share) {
+      try { await navigator.share({ title: text, text, url }); return; }
+      catch (e) { if (e.name === "AbortError") return; }
+    }
+    try {
+      await navigator.clipboard.writeText(url);
+      toast("Ссылка скопирована — отправь её в мессенджер");
+    } catch (e) {
+      openSheet(`<h2>Ссылка на рецепт</h2><p class="muted small">Скопируй и отправь в мессенджер:</p>
+        <textarea class="input" rows="4" readonly>${esc(url)}</textarea>
+        <button class="btn ghost" data-a="closeSheet">Готово</button>`);
+    }
+  },
+  importRecipe() {
+    const d = ui.incoming;
+    const prod = { id: "u" + uid(), name: d.name, ...recipeCalc(d.recipe).per100, recipe: d.recipe };
+    S.products.unshift(prod);
+    save(); ui.incoming = null; closeSheet(); render();
+    toast(`Рецепт «${d.name}» добавлен`);
+  },
+  setSkin(el) { S.skin = el.dataset.v; save(); render(); },
   deleteProduct(el) {
     S.products = S.products.filter(p => p.id !== el.dataset.id);
     S.recent = S.recent.filter(id => id !== el.dataset.id);
@@ -986,6 +1250,7 @@ const VIEWS = {
 
 function render() {
   ui.today = dayKey();
+  document.documentElement.dataset.skin = S.skin === "cookie" ? "cookie" : "green";
   if (!S.profile) ui.view = "setup";
   if (ui.view !== "setup") ui.onPick = null;
   const [view, mount] = VIEWS[ui.view];
@@ -995,6 +1260,12 @@ function render() {
   $("#tabs").hidden = ui.view === "setup";
   renderTabs();
   mount?.();
+  // ссылка «Поделиться рецептом»
+  if (S.profile && location.hash.startsWith("#recipe=") && $("#sheet").hidden) {
+    const data = parseRecipeHash();
+    history.replaceState(null, "", location.pathname);
+    if (data) incomingRecipeSheet(data); else toast("Ссылка на рецепт повреждена");
+  }
 }
 
 window.addEventListener("beforeinstallprompt", e => {
