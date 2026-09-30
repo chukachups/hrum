@@ -672,6 +672,7 @@ function openSheet(html) {
   document.body.style.overflow = "hidden";
 }
 async function closeSheet() {
+  ui.scanTarget = null;
   await stopScanner();
   $("#sheet").hidden = true;
   $("#sheetBody").innerHTML = "";
@@ -758,7 +759,9 @@ function productFormSheet({ barcode = null, name = "", edit = null, note = "" } 
       S.products.unshift(prod);
     }
     save();
-    if (ui.addMeal && !edit) {
+    if (ui.scanTarget === "recipe" && !edit) {
+      recipeIngGrams(ingredientFrom(prod), null);
+    } else if (ui.addMeal && !edit) {
       gramsSheet(prod, ui.addMeal);
     } else {
       closeSheet();
@@ -845,16 +848,27 @@ function recipeSheet() {
 function recipeIngSearch() {
   openSheet(`<h2>Ингредиент</h2>
     <input id="isearch" class="input" type="search" placeholder="Например, свёкла" autocomplete="off">
-    <button class="btn ghost" data-a="rBack">Назад к рецепту</button>
+    <div class="btn-row">
+      <button class="btn ghost" data-a="rScan">Штрихкод</button>
+      <button class="btn ghost" data-a="rNewProduct">+ Продукт</button>
+      <button class="btn ghost" data-a="rBack">Назад</button>
+    </div>
     <div id="ilist" class="list"></div>`);
   const inp = $("#isearch");
   const draw = () => {
     const list = searchProducts(inp.value).filter(x => x.id !== ui.rd.id).slice(0, 60);
     $("#ilist").innerHTML = list.length ? productRows(list, "rIngPick", inp.value)
-      : `<p class="muted">Не нашёл «${esc(inp.value)}». Добавь его через «+ Продукт» на вкладке «Продукты», потом вернись к рецепту.</p>`;
+      : `<p class="muted">Не нашёл «${esc(inp.value)}».</p>
+        <button class="btn ghost" data-a="rNewProduct" data-name="${esc(inp.value)}">Создать продукт «${esc(inp.value)}»</button>`;
   };
   inp.addEventListener("input", draw);
   draw();
+}
+
+// Продукт → ингредиент рецепта (для вложенного рецепта берём его КБЖУ на 100 г)
+function ingredientFrom(p) {
+  const per = p.recipe ? recipeCalc(p.recipe).per100 : p;
+  return { name: p.name, kcal: per.kcal, p: per.p, f: per.f, c: per.c, grams: 0 };
 }
 
 function recipeIngGrams(item, idx) {
@@ -925,7 +939,7 @@ async function stopScanner() {
 function scanMsg(text) { const el = $("#scanMsg"); if (el) el.textContent = text; }
 
 async function scanSheet() {
-  if (!ui.addMeal) ui.addMeal = mealByTime();
+  if (!ui.addMeal && ui.scanTarget !== "recipe") ui.addMeal = mealByTime();
   openSheet(`<h2>Штрихкод</h2>
     <div id="reader"></div>
     <p id="scanMsg" class="muted small">Наведи камеру на штрихкод товара</p>
@@ -933,6 +947,7 @@ async function scanSheet() {
       <label class="btn ghost">Из фото<input type="file" id="scanFile" accept="image/*" hidden></label>
       <button class="btn ghost" data-a="manualCode">Ввести цифры</button>
     </div>
+    ${ui.scanTarget === "recipe" ? `<button class="btn ghost" data-a="rBack">Назад к рецепту</button>` : ""}
     <form id="codeForm" class="grid2" hidden>
       <input id="codeInput" class="input" inputmode="numeric" placeholder="4600000000000">
       <button class="btn" type="submit">Найти</button>
@@ -981,7 +996,8 @@ async function onCode(code) {
         save();
       }
     }
-    if (p) gramsSheet(p, ui.addMeal || mealByTime());
+    if (p && ui.scanTarget === "recipe") recipeIngGrams(ingredientFrom(p), null);
+    else if (p) gramsSheet(p, ui.addMeal || mealByTime());
     else productFormSheet({
       barcode: code,
       note: `Товара ${esc(code)} нет в открытой базе. Перепиши КБЖУ с этикетки один раз — дальше Хрум узнает его по штрихкоду.`,
@@ -1010,6 +1026,7 @@ const actions = {
   },
   addFood(el) { addFoodSheet(el.dataset.meal); },
   scan() {
+    ui.scanTarget = null;
     if ($("#sheet").hidden) ui.addMeal = ui.view === "diary" ? mealByTime() : null;
     if (!ui.addMeal) ui.addMeal = mealByTime();
     if (ui.view !== "diary") { ui.view = "diary"; render(); }
@@ -1039,11 +1056,9 @@ const actions = {
     openRecipeEditor(null);
   },
   rIngAdd() { syncDraft(); recipeIngSearch(); },
-  rIngPick(el) {
-    const p = findProduct(el.dataset.id);
-    const per = p.recipe ? recipeCalc(p.recipe).per100 : p;
-    recipeIngGrams({ name: p.name, kcal: per.kcal, p: per.p, f: per.f, c: per.c, grams: 0 }, null);
-  },
+  rIngPick(el) { recipeIngGrams(ingredientFrom(findProduct(el.dataset.id)), null); },
+  rScan() { ui.scanTarget = "recipe"; scanSheet(); },
+  rNewProduct(el) { ui.scanTarget = "recipe"; productFormSheet({ name: el.dataset.name || "" }); },
   rIngEdit(el) { syncDraft(); const i = +el.dataset.i; recipeIngGrams(ui.rd.items[i], i); },
   rIngSave() {
     const g = num($("#igrams").value);
@@ -1051,10 +1066,11 @@ const actions = {
     const { item, idx } = ui.rIng;
     if (idx != null) ui.rd.items[idx].grams = g;
     else ui.rd.items.push({ ...item, grams: g });
+    ui.scanTarget = null;
     recipeSheet();
   },
   rIngDelete() { ui.rd.items.splice(ui.rIng.idx, 1); recipeSheet(); },
-  rBack() { recipeSheet(); },
+  async rBack() { ui.scanTarget = null; await stopScanner(); recipeSheet(); },
   rSave() {
     syncDraft();
     const rd = ui.rd;
