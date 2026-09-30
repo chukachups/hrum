@@ -477,7 +477,8 @@ function viewProfile() {
       <button class="btn ghost" data-a="exportData">Сохранить копию</button>
       <label class="btn ghost">Загрузить копию<input type="file" id="importFile" accept="application/json,.json" hidden></label>
     </div>
-    <button class="btn ghost" data-a="install">Установить на главный экран</button>`;
+    <button class="btn ghost" data-a="install">Установить на главный экран</button>
+    <button class="btn danger" data-a="askReset">Стереть все данные</button>`;
 }
 function mountProfile() {
   $("#importFile").addEventListener("change", async e => {
@@ -937,6 +938,22 @@ const actions = {
       ${IS_ANDROID ? android + ios : ios + android}
       <p class="muted small">Данные и так хранятся на телефоне — установка просто делает Хрум похожим на обычное приложение.</p>
       <button class="btn ghost" data-a="closeSheet">Понятно</button>`);
+  },
+  askReset() {
+    openSheet(`<h2>Стереть все данные?</h2>
+      <p>Удалятся профиль, все записи еды, тренировки, вес и твои продукты. Хрум начнётся с чистого листа.</p>
+      <p class="note">Вернуть можно только из файла копии. Если данные нужны — сначала нажми «Сохранить копию».</p>
+      <button class="btn danger" data-a="doReset">Да, стереть всё</button>
+      <button class="btn ghost" data-a="closeSheet">Отмена</button>`);
+  },
+  doReset() {
+    try { localStorage.removeItem(STORE_KEY); } catch (e) { /* ignore */ }
+    S = blank();
+    ui.day = dayKey();
+    closeSheet();
+    render();
+    window.scrollTo(0, 0);
+    toast("Всё стёрто. Начнём заново!");
   },
   hideInstall() {
     try { localStorage.setItem(HIDE_INSTALL_KEY, String(Date.now())); } catch (e) { /* ignore */ }
