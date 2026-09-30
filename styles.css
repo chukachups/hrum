@@ -277,3 +277,5 @@ h2 { font-weight: 500; font-size: 17px; margin: 0; }
 }
 
 .meal > .item:first-child, .meal > .empty:first-child { border-top: 0; }
+
+#scanMsg.scan-tip { color: var(--ink); background: var(--accent-soft); border-radius: 12px; padding: 10px 12px; font-size: 14px; }

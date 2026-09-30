@@ -214,29 +214,31 @@ function touchRecent(id) {
   S.recent = [id, ...S.recent.filter(x => x !== id)].slice(0, 30);
 }
 
+// → { product } | { missing: true, name? } (нет товара или нет КБЖУ) | { error: true } (сеть)
 async function fetchOFF(code) {
   const ctrl = new AbortController();
-  const timer = setTimeout(() => ctrl.abort(), 12000);
+  const timer = setTimeout(() => ctrl.abort(), 10000);
   try {
     const r = await fetch(
       `https://world.openfoodfacts.org/api/v2/product/${encodeURIComponent(code)}.json?fields=product_name,product_name_ru,brands,nutriments`,
       { signal: ctrl.signal }
     );
-    if (!r.ok) return null;
+    if (r.status === 404) return { missing: true };
+    if (!r.ok) return { error: true };
     const d = await r.json();
     const pr = d.product;
-    if (!pr) return null;
+    if (!pr) return { missing: true };
+    let name = pr.product_name_ru || pr.product_name || "";
+    const brand = (pr.brands || "").split(",")[0].trim();
+    if (name && brand && !norm(name).includes(norm(brand))) name += ` (${brand})`;
     const n = pr.nutriments || {};
     let kcal = n["energy-kcal_100g"];
     if (kcal == null && n.energy_100g != null) kcal = n.energy_100g / 4.184;
-    if (kcal == null) return null;
-    let name = pr.product_name_ru || pr.product_name || `Товар ${code}`;
-    const brand = (pr.brands || "").split(",")[0].trim();
-    if (brand && !norm(name).includes(norm(brand))) name += ` (${brand})`;
+    if (kcal == null) return { missing: true, name };
     const v = x => Math.round((+x || 0) * 10) / 10;
-    return { name, kcal: v(kcal), p: v(n.proteins_100g), f: v(n.fat_100g), c: v(n.carbohydrates_100g) };
+    return { product: { name: name || `Товар ${code}`, kcal: v(kcal), p: v(n.proteins_100g), f: v(n.fat_100g), c: v(n.carbohydrates_100g) } };
   } catch (e) {
-    return null;
+    return { error: true };
   } finally {
     clearTimeout(timer);
   }
@@ -930,13 +932,20 @@ function scannerConfig() {
   };
 }
 async function stopScanner() {
+  clearTimeout(ui.scanTip1);
+  clearTimeout(ui.scanTip2);
   if (!scanner) return;
   const s = scanner;
   scanner = null;
   try { if (s.isScanning) await s.stop(); } catch (e) { /* уже остановлен */ }
   try { s.clear(); } catch (e) { /* ignore */ }
 }
-function scanMsg(text) { const el = $("#scanMsg"); if (el) el.textContent = text; }
+function scanMsg(text, tip = false) {
+  const el = $("#scanMsg");
+  if (!el) return;
+  el.textContent = text;
+  el.classList.toggle("scan-tip", tip);
+}
 
 async function scanSheet() {
   if (!ui.addMeal && ui.scanTarget !== "recipe") ui.addMeal = mealByTime();
@@ -975,8 +984,18 @@ async function scanSheet() {
       code => onCode(code),
       () => {}
     );
+    // не читается — сначала подсказка, потом сразу ввод цифр
+    ui.scanTip1 = setTimeout(() => scanMsg(
+      "Не читается? Поднеси телефон ближе, чтобы полоски заняли почти всю рамку, держи ровно и без бликов. Помогает яркий свет.", true), 8000);
+    ui.scanTip2 = setTimeout(() => {
+      const form = $("#codeForm");
+      if (!form) return;
+      form.hidden = false;
+      scanMsg("Камера никак не прочитает код. Введи цифры, которые напечатаны под полосками, — так быстрее.", true);
+    }, 15000);
   } catch (e) {
-    scanMsg("Камера недоступна. Разреши доступ к камере в настройках браузера или выбери фото штрихкода.");
+    $("#codeForm").hidden = false;
+    scanMsg("Камера недоступна. Разреши доступ к камере в настройках браузера, выбери фото штрихкода или введи цифры под полосками.", true);
   }
 }
 
@@ -987,21 +1006,27 @@ async function onCode(code) {
     await stopScanner();
     if (navigator.vibrate) navigator.vibrate(40);
     let p = allProducts().find(x => x.barcode === code);
+    let off = null;
     if (!p) {
-      scanMsg(`Штрихкод ${code}. Ищу в базе Open Food Facts…`);
-      const off = await fetchOFF(code);
-      if (off) {
-        p = { id: "u" + uid(), ...off, barcode: code };
+      scanMsg(`Прочитал: ${code}. Ищу в открытой базе…`);
+      off = await fetchOFF(code);
+      if (off.product) {
+        p = { id: "u" + uid(), ...off.product, barcode: code };
         S.products.unshift(p);
         save();
       }
     }
     if (p && ui.scanTarget === "recipe") recipeIngGrams(ingredientFrom(p), null);
     else if (p) gramsSheet(p, ui.addMeal || mealByTime());
-    else productFormSheet({
-      barcode: code,
-      note: `Товара ${esc(code)} нет в открытой базе. Перепиши КБЖУ с этикетки один раз — дальше Хрум узнает его по штрихкоду.`,
-    });
+    else {
+      const tail = "Перепиши КБЖУ с этикетки один раз — дальше Хрум будет узнавать этот товар сразу.";
+      const note = off.error
+        ? `<b>Не удалось связаться с базой</b> — похоже, нет интернета. Штрихкод ${esc(code)} прочитан. ${tail}`
+        : off.name
+          ? `<b>Товар есть в базе, но без КБЖУ.</b> Название подставил. ${tail}`
+          : `<b>Товара ${esc(code)} нет в открытой базе</b> — с российскими товарами так бывает часто. ${tail}`;
+      productFormSheet({ barcode: code, name: off.name || "", note });
+    }
   } finally {
     ui.codeBusy = false;
   }
