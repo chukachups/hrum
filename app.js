@@ -150,7 +150,8 @@ function dayData(k) {
   for (const e of es) for (const x in eaten) eaten[x] += e[x];
   const burned = ws.reduce((s, w) => s + w.kcal, 0);
   const t = targets();
-  return { es, ws, eaten, burned, t, limit: t.kcal + burned };
+  // тренировки лимит не увеличивают — идут бонусом к дефициту
+  return { es, ws, eaten, burned, t, limit: t.kcal };
 }
 
 /* ================= Продукты ================= */
@@ -300,8 +301,8 @@ function viewDiary() {
 
   const workouts = d.ws.map(w => `<button class="row-card" data-a="editWorkout" data-id="${w.id}">
       <span class="badge">${icon("run", 20)}</span>
-      <span class="t"><b>${esc(w.name)}</b><span>${fmt(w.minutes, 0)} мин</span></span>
-      <span class="p">+${r0(w.kcal)}</span></button>`).join("");
+      <span class="t"><b>${esc(w.name)}</b><span>${fmt(w.minutes, 0)} мин${w.manual ? " · по часам" : ""}</span></span>
+      <span class="p">−${r0(w.kcal)}</span></button>`).join("");
 
   return `
   <header class="top">
@@ -327,18 +328,18 @@ function viewDiary() {
       </div>
       <div class="balance">
         <div class="kv"><span>Норма</span><b>${r0(t.kcal)}</b></div>
-        <div class="kv"><span>Тренировки</span><b class="plus">+${r0(burned)}</b></div>
         <div class="kv"><span>Съедено</span><b>${r0(eaten.kcal)}</b></div>
         <hr>
-        <div class="kv"><span>Лимит дня</span><b>${r0(limit)}</b></div>
+        <div class="kv"><span>Спорт</span><b class="plus">${burned ? "−" + r0(burned) : "0"}</b></div>
       </div>
     </div>
     `}
     <div class="macros">
       ${macro("Белки", eaten.p, t.p, "--protein")}
       ${macro("Жиры", eaten.f, t.f, "--fat")}
-      ${macro("Углеводы", eaten.c, t.c + burned / 4, "--carbs")}
+      ${macro("Углеводы", eaten.c, t.c, "--carbs")}
     </div>
+    ${burned ? `<p class="sport-bonus">Тренировки сегодня: <b>−${r0(burned)} ккал</b> ≈ ${r0(burned / 7.7)} г жира сверх плана</p>` : ""}
     <div class="basis">
       <span>Сухая масса <b>${fmt(t.lbm)} кг</b></span>
       <span>Жир <b>${fmt(S.profile.bodyFat)}%</b></span>
@@ -349,7 +350,7 @@ function viewDiary() {
   <div class="section-title"><h2>Приёмы пищи</h2><span>${d.es.length ? d.es.length + " " + plural(d.es.length, ["запись", "записи", "записей"]) : "нажми +, чтобы добавить"}</span></div>
   ${meals}
 
-  <div class="section-title"><h2>Активность</h2><span>${burned ? "+" + r0(burned) + " ккал" : ""}</span></div>
+  <div class="section-title"><h2>Активность</h2><span>${burned ? "−" + r0(burned) + " ккал, в лимит не входят" : "ускоряет похудение"}</span></div>
   ${workouts}
   <button class="row-card dashed" data-a="addWorkout">+ Добавить тренировку</button>
 
@@ -394,8 +395,8 @@ function cookieBlock(d) {
       <div class="balance">
         <div><div class="big ${over ? "over" : ""}">${r0(Math.abs(left))}</div><div class="cap">${over ? "ккал сверх лимита" : "ккал ещё можно съесть"}</div></div>
         <div class="kv"><span>Норма</span><b>${r0(t.kcal)}</b></div>
-        <div class="kv"><span>Тренировки</span><b class="plus">+${r0(burned)}</b></div>
         <div class="kv"><span>Откушено</span><b>${r0(eaten.kcal)}</b></div>
+        <div class="kv"><span>Спорт</span><b class="plus">${burned ? "−" + r0(burned) : "0"}</b></div>
       </div>
     </div>
     <p class="cookie-cap">${cap}</p>
@@ -463,20 +464,21 @@ function productRows(list, action, q) {
 function viewProgress() {
   const t = targets();
   const days = Array.from({ length: 14 }, (_, i) => shiftDay(dayKey(), i - 13));
-  const data = days.map(k => { const d = dayData(k); return { k, eaten: d.eaten.kcal, limit: d.limit, has: d.es.length > 0 }; });
+  const data = days.map(k => { const d = dayData(k); return { k, eaten: d.eaten.kcal, limit: d.limit, burned: d.burned, has: d.es.length > 0 }; });
 
   // сегодняшний день ещё не закончен — в среднее не берём
   const last7 = data.slice(-8, -1).filter(x => x.has);
   let stats = `<p class="muted small">Записывай еду несколько дней — со следующего дня здесь появится средний дефицит и прогноз.</p>`;
   if (last7.length) {
     const avg = last7.reduce((s, x) => s + x.eaten, 0) / last7.length;
-    const bal = last7.reduce((s, x) => s + (x.limit - x.eaten), 0) / last7.length;
+    const bal = last7.reduce((s, x) => s + (x.limit - x.eaten + x.burned), 0) / last7.length;
+    const sport = last7.reduce((s, x) => s + x.burned, 0) / last7.length;
     const kgWeek = bal * 7 / 7700;
     stats = `<div class="stats">
       <div class="stat"><b>${r0(avg)}</b><span>ккал в день, в среднем</span></div>
       <div class="stat"><b>${bal >= 0 ? "−" : "+"}${r0(Math.abs(bal))}</b><span>${bal >= 0 ? "дефицит" : "профицит"} в день</span></div>
       <div class="stat"><b>${kgWeek >= 0 ? "−" : "+"}${fmt(Math.abs(kgWeek))}</b><span>кг в неделю при таком темпе</span></div>
-    </div><p class="muted small">По ${last7.length} ${plural(last7.length, ["полному дню", "полным дням", "полным дням"])} с записями за неделю, без сегодняшнего. 1 кг жира ≈ 7700 ккал.</p>`;
+    </div><p class="muted small">По ${last7.length} ${plural(last7.length, ["полному дню", "полным дням", "полным дням"])} с записями за неделю, без сегодняшнего. 1 кг жира ≈ 7700 ккал.${sport ? ` Из дефицита тренировки дают ${r0(sport)} ккал в день.` : ""}</p>`;
   }
 
   // Столбики калорий
@@ -490,7 +492,6 @@ function viewProgress() {
     if (x.eaten > 0) {
       bars += `<rect x="${bx}" y="${y(x.eaten)}" width="${bw}" height="${y(0) - y(x.eaten)}" rx="3" fill="var(${x.eaten > x.limit ? "--danger" : "--accent"})"/>`;
     }
-    bars += `<line x1="${bx - 2}" x2="${bx + bw + 2}" y1="${y(x.limit)}" y2="${y(x.limit)}" stroke="var(--ink)" stroke-width="1.5" opacity=".5"/>`;
     if (i % 2 === 1) bars += `<text x="${bx + bw / 2}" y="${H - 6}" font-size="10" text-anchor="middle" fill="var(--muted)">${parseDay(x.k).getDate()}</text>`;
   });
   const kcalChart = `<svg viewBox="0 0 ${W} ${H}" role="img" aria-label="Калории за 14 дней">
@@ -524,7 +525,7 @@ function viewProgress() {
 
   return `<header class="top"><h1>Прогресс</h1></header>
     <section class="card">${stats}</section>
-    <div class="section-title"><h2>Калории за 14 дней</h2><span>черта — лимит дня</span></div>
+    <div class="section-title"><h2>Калории за 14 дней</h2><span>пунктир — норма</span></div>
     <section class="card chart">${kcalChart}</section>
     <div class="section-title"><h2>Вес</h2><span>${pts.length ? pts.length + " " + plural(pts.length, ["запись", "записи", "записей"]) : ""}</span></div>
     <section class="card chart">${weightChart}</section>
@@ -552,11 +553,16 @@ function viewProfile() {
       <p class="small">Сухая масса = вес × (1 − % жира). Базовый обмен по формуле Кетча-МакАрдла: 370 + 21,6 × сухая масса.
       Он точнее обычных формул, потому что жир почти не тратит энергию, а мышцы тратят.</p>
       <p class="small">Базовый обмен умножается на бытовую активность без тренировок, затем корректируется под цель.
-      Тренировки добавляются к лимиту конкретного дня.</p>
+      Тренировки лимит не увеличивают: сожжённое на них идёт сверх дефицита и ускоряет похудение.</p>
       <p class="small">Белок: ${p.goal === "cut" ? "2,2" : "2,0"} г на кг сухой массы. Жиры: 0,9 г на кг веса. Углеводы — остаток калорий.</p>
     </details>
     <button class="btn" data-a="addWeight">Записать вес</button>
     <button class="btn ghost" data-a="editProfile">Изменить профиль</button>
+    <div class="section-title"><h2>Второй человек</h2><span>для общих блюд</span></div>
+    <button class="row-card" data-a="editPartner">
+      <span class="t"><b>${S.partner ? esc(S.partner.name) : "Не указан"}</b>
+      <span>${S.partner ? `норма ${r0(S.partner.kcal)} ккал · рецепты делятся на двоих` : "укажи норму — Хрум будет делить блюда пропорционально"}</span></span>
+      <span class="p">›</span></button>
     <div class="section-title"><h2>Оформление</h2></div>
     <div class="seg">
       <button data-a="setSkin" data-v="green" aria-pressed="${S.skin !== "cookie"}">Зелёный</button>
@@ -794,12 +800,41 @@ function recipeInfoSheet(p) {
       <hr class="rule">
       ${r.items.map(x => `<div class="kv"><span>${esc(x.name)}</span><b>${fmt(x.grams, 0)} г</b></div>`).join("")}
     </div>
+    ${splitCard(c)}
     <button class="btn" data-a="productToDiary" data-id="${p.id}">Добавить в дневник</button>
     <div class="btn-row">
       <button class="btn ghost" data-a="editProduct" data-id="${p.id}">Изменить</button>
       <button class="btn ghost" data-a="shareRecipe" data-id="${p.id}">Поделиться</button>
     </div>
     <button class="btn danger" data-a="deleteProduct" data-id="${p.id}">Удалить рецепт</button>`);
+}
+
+// Делим блюдо пропорционально нормам: кому больше калорий — тому больше грамм
+function splitCard(c) {
+  const partner = S.partner;
+  if (!partner || !partner.kcal) {
+    return `<button class="row-card dashed" data-a="editPartner">Разделить на двоих — укажи норму второго человека</button>`;
+  }
+  const mine = targets().kcal, share = mine / (mine + partner.kcal);
+  const g1 = c.weight * share, g2 = c.weight - g1, k = c.per100.kcal / 100;
+  return `<div class="card form split">
+    <b>Разделить на двоих</b>
+    <div class="kv"><span>Тебе (${Math.round(share * 100)}%)</span><b>${fmt(g1, 0)} г · ${r0(g1 * k)} ккал</b></div>
+    <div class="kv"><span>${esc(partner.name)} (${100 - Math.round(share * 100)}%)</span><b>${fmt(g2, 0)} г · ${r0(g2 * k)} ккал</b></div>
+    <p class="muted small">Из ${fmt(c.weight, 0)} г, пропорционально нормам: ${r0(mine)} и ${r0(partner.kcal)} ккал в день.</p>
+  </div>`;
+}
+
+function partnerSheet() {
+  const pt = S.partner || {};
+  openSheet(`<h2>Второй человек</h2>
+    <p class="muted small">Чтобы делить общие блюда: Хрум разложит кастрюлю пропорционально вашим нормам. Норму второго человека посмотри в его Хруме — Профиль, строка «Цель».</p>
+    <div class="grid2">
+      <label class="field"><span>Кто</span><input id="ptName" class="input" value="${esc(pt.name || "")}" placeholder="Жена"></label>
+      <label class="field"><span>Норма, ккал в день</span><input id="ptKcal" class="input" inputmode="numeric" value="${pt.kcal ? r0(pt.kcal) : ""}" placeholder="1500"></label>
+    </div>
+    <button class="btn" data-a="savePartner">Сохранить</button>
+    ${S.partner ? `<button class="btn danger" data-a="clearPartner">Убрать</button>` : ""}`);
 }
 
 function openRecipeEditor(p) {
@@ -896,16 +931,24 @@ function incomingRecipeSheet(data) {
 function workoutSheet() {
   openSheet(`<h2>Тренировка</h2>
     <div class="chips" id="wType">${WORKOUTS.map(([n], i) => `<button class="chip" data-a="pick" data-val="${i}" aria-pressed="${i === 0}">${n}</button>`).join("")}</div>
-    <label class="field"><span>Сколько минут</span><input id="wMin" class="input" inputmode="numeric" value="30"></label>
+    <div class="grid2">
+      <label class="field"><span>Сколько минут</span><input id="wMin" class="input" inputmode="numeric" value="30"></label>
+      <label class="field"><span>Ккал по часам</span><input id="wKcal" class="input" inputmode="numeric" placeholder="если знаешь"></label>
+    </div>
     <div class="card preview" id="wPrev"></div>
+    <p class="note">Вноси только специальные занятия: зал, бег, бассейн, прогулку ради прогулки. Дорога, офис и дела по дому уже учтены в норме. Тренировки не увеличивают лимит еды — они ускоряют похудение.</p>
     <button class="btn" data-a="saveWorkout">Добавить</button>`);
   const upd = () => {
     const [, met] = WORKOUTS[+$('#wType [aria-pressed="true"]').dataset.val];
-    const kc = workoutKcal(met, S.profile.weight, num($("#wMin").value) || 0);
-    $("#wPrev").innerHTML = `<span><b>+${r0(kc)}</b> ккал к лимиту дня</span><span class="muted small">по весу ${fmt(S.profile.weight)} кг и нагрузке ${fmt(met)} MET</span>`;
+    const min = num($("#wMin").value) || 0, own = num($("#wKcal").value);
+    const kc = own != null && own > 0 ? own : workoutKcal(met, S.profile.weight, min);
+    const how = own != null && own > 0 ? "по данным твоих часов"
+      : `${fmt(min, 0)} мин × ${fmt(S.profile.weight)} кг × (${fmt(met)} − 1) ÷ 60 — расчёт по нагрузке`;
+    $("#wPrev").innerHTML = `<span><b>−${r0(kc)}</b> ккал ≈ ${r0(kc / 7.7)} г жира</span><span class="muted small">${how}</span>`;
   };
   ui.onPick = upd;
   $("#wMin").addEventListener("input", upd);
+  $("#wKcal").addEventListener("input", upd);
   upd();
 }
 
@@ -1140,6 +1183,14 @@ const actions = {
     save(); ui.incoming = null; closeSheet(); render();
     toast(`Рецепт «${d.name}» добавлен`);
   },
+  editPartner() { partnerSheet(); },
+  savePartner() {
+    const kcal = num($("#ptKcal").value);
+    if (!kcal || kcal < 800 || kcal > 6000) { toast("Норма — от 800 до 6000 ккал"); return; }
+    S.partner = { name: $("#ptName").value.trim() || "Второй человек", kcal };
+    save(); closeSheet(); render(); toast("Сохранено — общие блюда теперь делятся на двоих");
+  },
+  clearPartner() { S.partner = null; save(); closeSheet(); render(); },
   setSkin(el) { S.skin = el.dataset.v; save(); render(); },
   deleteProduct(el) {
     S.products = S.products.filter(p => p.id !== el.dataset.id);
@@ -1176,14 +1227,17 @@ const actions = {
     const min = num($("#wMin").value);
     if (!min || min <= 0 || min > 600) { toast("Укажи минуты"); return; }
     const [name, met] = WORKOUTS[+$('#wType [aria-pressed="true"]').dataset.val];
-    (S.workouts[ui.day] ||= []).push({ id: uid(), name, minutes: min, kcal: workoutKcal(met, S.profile.weight, min) });
+    const own = num($("#wKcal").value);
+    if (own != null && (own <= 0 || own > 5000)) { toast("Калории — от 1 до 5000"); return; }
+    const kcal = own || workoutKcal(met, S.profile.weight, min);
+    (S.workouts[ui.day] ||= []).push({ id: uid(), name, minutes: min, kcal, manual: !!own });
     save(); closeSheet(); render(); toast("Тренировка добавлена");
   },
   editWorkout(el) {
     const w = (S.workouts[ui.day] || []).find(x => x.id === el.dataset.id);
     if (!w) return;
     ui.wEdit = w;
-    openSheet(`<h2>${esc(w.name)}</h2><p class="muted">${fmt(w.minutes, 0)} мин · +${r0(w.kcal)} ккал к лимиту дня</p>
+    openSheet(`<h2>${esc(w.name)}</h2><p class="muted">${fmt(w.minutes, 0)} мин · −${r0(w.kcal)} ккал ≈ ${r0(w.kcal / 7.7)} г жира${w.manual ? " · по часам" : ""}</p>
       <button class="btn danger" data-a="deleteWorkout">Удалить тренировку</button>`);
   },
   deleteWorkout() {
