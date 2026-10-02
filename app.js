@@ -778,9 +778,15 @@ function viewProfile() {
       <label class="btn ghost">Загрузить копию<input type="file" id="importFile" accept="application/json,.json" hidden></label>
     </div>
     <button class="btn ghost" data-a="install">Установить на главный экран</button>
-    <button class="btn danger" data-a="askReset">Стереть все данные</button>`;
+    <button class="btn danger" data-a="askReset">Стереть все данные</button>
+    <p class="muted small" id="appVer" style="text-align:center"></p>`;
 }
 function mountProfile() {
+  // номер версии — чтобы видеть, дошло ли обновление (это имя кэша из sw.js)
+  if (window.caches) caches.keys().then(k => {
+    const v = k.filter(x => x.startsWith("hrum-")).map(x => +x.slice(5)).sort((a, b) => b - a)[0];
+    if (v && $("#appVer")) $("#appVer").textContent = `Версия ${v}`;
+  }).catch(() => {});
   $("#importFile").addEventListener("change", async e => {
     const file = e.target.files[0];
     if (!file) return;
@@ -1849,7 +1855,16 @@ document.addEventListener("visibilitychange", () => {
   if (ui.view === "diary" && $("#sheet").hidden) render();
 });
 if ("serviceWorker" in navigator && (location.protocol === "https:" || location.hostname === "localhost")) {
-  navigator.serviceWorker.register("sw.js").catch(() => {});
+  navigator.serviceWorker.register("sw.js", { updateViaCache: "none" }).catch(() => {});
+  // Новая версия взяла управление — перезагружаемся один раз, чтобы сразу её показать.
+  // Если открыто окно (что-то вводят) — не мешаем, просим перезапустить.
+  const hadController = !!navigator.serviceWorker.controller;
+  let reloaded = false;
+  navigator.serviceWorker.addEventListener("controllerchange", () => {
+    if (!hadController || reloaded) return;
+    if ($("#sheet").hidden && ui.view !== "setup") { reloaded = true; location.reload(); }
+    else toast("Хрум обновился — закрой и открой его, чтобы увидеть новое");
+  });
 }
 
 render();

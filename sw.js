@@ -1,12 +1,16 @@
 // Офлайн-кэш оболочки приложения. При изменении файлов увеличивай VERSION.
-const VERSION = "hrum-20";
+const VERSION = "hrum-21";
 const SHELL = [
   "./", "index.html", "styles.css", "app.js", "products.js", "perekrestok.js", "dodo.js", "manifest.webmanifest",
   "vendor/html5-qrcode.min.js", "icons/icon-192.png", "icons/icon-512.png", "icons/apple-touch-icon.png", "icons/author.png",
 ];
 
 self.addEventListener("install", e => {
-  e.waitUntil(caches.open(VERSION).then(c => c.addAll(SHELL)).then(() => self.skipWaiting()));
+  // cache: "reload" — мимо HTTP-кэша браузера (GitHub Pages разрешает держать файлы 10 минут),
+  // иначе в новую версию попадали старые файлы
+  e.waitUntil(caches.open(VERSION)
+    .then(c => c.addAll(SHELL.map(u => new Request(u, { cache: "reload" }))))
+    .then(() => self.skipWaiting()));
 });
 
 self.addEventListener("activate", e => {
@@ -34,9 +38,12 @@ self.addEventListener("fetch", e => {
     return;
   }
   if (url.origin !== location.origin) return;
-  // Своё: сначала сеть (чтобы обновления приходили сразу), без сети — кэш
+  // Своё: сначала сеть (чтобы обновления приходили сразу), без сети — кэш.
+  // no-cache: всегда сверяемся с сайтом (если файл тот же — короткий ответ 304), а не берём
+  // копию браузера, которая на iPhone держалась до 10 минут после выкладки
+  const fresh = e.request.mode === "navigate" ? fetch(e.request.url, { cache: "no-cache" }) : fetch(e.request, { cache: "no-cache" });
   e.respondWith(
-    fetch(e.request)
+    fresh
       .then(res => {
         if (res.ok) { const copy = res.clone(); caches.open(VERSION).then(c => c.put(e.request, copy)); }
         return res;
