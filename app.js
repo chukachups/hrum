@@ -700,9 +700,11 @@ function mountSetup() {
 
 /* ================= Листы ================= */
 
-function openSheet(html) {
+// tall — лист на всю высоту: строка поиска остаётся наверху, когда список сжимается и открыта клавиатура
+function openSheet(html, tall = false) {
   if (ui.view !== "setup") ui.onPick = null;
   $("#sheetBody").innerHTML = html;
+  $(".sheet-panel").classList.toggle("tall", tall);
   $("#sheet").hidden = false;
   document.body.style.overflow = "hidden";
 }
@@ -726,7 +728,7 @@ function addFoodSheet(meal) {
       <button class="btn ghost" data-a="newRecipe">+ Рецепт</button>
     </div>
     <div id="flabel" class="muted small"></div>
-    <div id="flist" class="list"></div>`);
+    <div id="flist" class="list"></div>`, true);
   const inp = $("#fsearch");
   const draw = () => {
     $("#flabel").textContent = !inp.value && S.recent.length ? "Недавние и все продукты" : "";
@@ -944,7 +946,7 @@ function recipeIngSearch() {
       <button class="btn ghost" data-a="rNewProduct">+ Продукт</button>
       <button class="btn ghost" data-a="rBack">Назад</button>
     </div>
-    <div id="ilist" class="list"></div>`);
+    <div id="ilist" class="list"></div>`, true);
   const inp = $("#isearch");
   const draw = () => {
     const list = searchProducts(inp.value).filter(x => x.id !== ui.rd.id).slice(0, 60);
@@ -1049,6 +1051,7 @@ async function scanSheet() {
   openSheet(`<h2>Штрихкод</h2>
     <div id="reader"></div>
     <p id="scanMsg" class="muted small">Наведи камеру на штрихкод товара</p>
+    ${IS_IOS ? `<p class="muted small">Safari спрашивает про камеру каждый раз? В Safari нажми «аА» слева от адреса → «Настройки веб-сайта» → «Камера» → «Разрешить».</p>` : ""}
     <div class="btn-row">
       <label class="btn ghost">Из фото<input type="file" id="scanFile" accept="image/*" hidden></label>
       <button class="btn ghost" data-a="manualCode">Ввести цифры</button>
@@ -1417,6 +1420,11 @@ document.addEventListener("click", e => {
   if (!el || el.disabled) return;
   const fn = actions[el.dataset.a];
   if (fn) { e.preventDefault(); fn(el); }
+});
+// числовые поля: при касании выделяем значение целиком — новое число пишется поверх старого
+document.addEventListener("focusin", e => {
+  const el = e.target;
+  if (el.matches?.("input[inputmode=decimal], input[inputmode=numeric]") && el.value) setTimeout(() => el.select(), 0);
 });
 document.addEventListener("keydown", e => { if (e.key === "Escape" && !$("#sheet").hidden) closeSheet(); });
 
