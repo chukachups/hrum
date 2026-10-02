@@ -1211,6 +1211,7 @@ function incomingFoodSheet(data) {
     ${data.meal ? `<div class="seg" id="fMeal">${MEALS.map(([k, t]) => `<button data-a="pick" data-val="${k}" aria-pressed="${k === data.meal}">${t}</button>`).join("")}</div>` : ""}
     <div class="seg" id="fDay"><button data-a="pick" data-val="${dayKey()}" aria-pressed="true">Сегодня</button><button data-a="pick" data-val="${shiftDay(dayKey(), -1)}" aria-pressed="false">Вчера</button></div>
     <div class="card preview" id="fPrev"></div>
+    <p class="note" id="fReplace" hidden></p>
     <button class="btn" data-a="importFood">Добавить в дневник</button>
     <button class="btn ghost" data-a="closeSheet">Не нужно</button>`, data.items.length > 4);
   const inputs = [...document.querySelectorAll("#sheetBody input[data-i]")];
@@ -1223,14 +1224,35 @@ function incomingFoodSheet(data) {
     }
     $("#fPrev").innerHTML = `<span><b>${r0(t.kcal)}</b> ккал</span><span>Б ${r0(t.p)}</span><span>Ж ${r0(t.f)}</span><span>У ${r0(t.c)}</span>`;
   };
+  const replaceNote = () => {
+    const { day, meals } = foodTarget(data);
+    const old = sharedIn(day, meals);
+    const el = $("#fReplace");
+    el.hidden = !old.length;
+    if (old.length) {
+      const names = [...new Set(old.map(e => mealName(e.meal).toLowerCase()))].join(", ");
+      el.textContent = `Присланное раньше (${names}, ${old.length} ${plural(old.length, ["запись", "записи", "записей"])}) заменится этим. Своё записанное останется.`;
+    }
+  };
   let cur = scaled ? ratio : 1;
-  fill(cur); upd();
+  fill(cur); upd(); replaceNote();
   inputs.forEach(inp => inp.addEventListener("input", upd));
   // выбор дня или приёма не сбрасывает поправленные граммы — только смена «под мою норму / как прислали»
   ui.onPick = () => {
     const r = +($('#fScale [aria-pressed="true"]')?.dataset.val || 1);
     if (r !== cur) { cur = r; fill(r); upd(); }
+    replaceNote();
   };
+}
+
+// Присланная еда: pid null — так помечались и записи до флага shared
+const isShared = e => e.shared || e.pid === null;
+const sharedIn = (day, meals) => (S.entries[day] || []).filter(e => isShared(e) && meals.includes(e.meal));
+// Куда ляжет присланное: выбранный день и приёмы (один выбранный или все из меню дня)
+function foodTarget(d) {
+  const day = $('#fDay [aria-pressed="true"]').dataset.val;
+  const meals = d.meal ? [$('#fMeal [aria-pressed="true"]').dataset.val] : [...new Set(d.items.map(x => x.meal))];
+  return { day, meals };
 }
 
 async function shareFood(meal) {
@@ -1551,21 +1573,24 @@ const actions = {
   },
   importFood() {
     const d = ui.incomingFood;
-    const day = $('#fDay [aria-pressed="true"]').dataset.val;
-    const meal = d.meal && $('#fMeal [aria-pressed="true"]').dataset.val;
+    const { day, meals } = foodTarget(d);
+    const meal = d.meal && meals[0];
+    // последнее присланное заменяет присланное раньше в те же приёмы; своё не трогаем
+    const replaced = sharedIn(day, meals).length;
+    if (replaced) S.entries[day] = S.entries[day].filter(e => !(isShared(e) && meals.includes(e.meal)));
     let n = 0, kc = 0;
     for (const inp of document.querySelectorAll("#sheetBody input[data-i]")) {
       const g = num(inp.value);
       if (!g || g <= 0 || g > 5000) continue;
       const x = d.items[inp.dataset.i], k = g / 100;
-      (S.entries[day] ||= []).push({ id: uid(), pid: null, name: x.name, meal: meal || x.meal, grams: g,
+      (S.entries[day] ||= []).push({ id: uid(), pid: null, shared: true, name: x.name, meal: meal || x.meal, grams: g,
         kcal: x.kcal * k, p: x.p * k, f: x.f * k, c: x.c * k });
       n++; kc += x.kcal * k;
     }
     if (!n) { toast("Укажи граммы"); return; }
     ui.incomingFood = null; ui.day = day; ui.view = "diary";
     save(); closeSheet(); render();
-    toast(`Добавлено: ${n} ${plural(n, ["продукт", "продукта", "продуктов"])}, ${r0(kc)} ккал`);
+    toast(`${replaced ? "Заменил присланное раньше. " : ""}Добавлено: ${n} ${plural(n, ["продукт", "продукта", "продуктов"])}, ${r0(kc)} ккал`);
   },
   async shareNorm() {
     const url = normLink();
