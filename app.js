@@ -273,7 +273,8 @@ function garnishOptions(d, meal) {
 const norm = s => String(s).toLowerCase().replace(/ё/g, "е").trim();
 const stem = w => (w.length > 4 ? w.slice(0, Math.max(3, w.length - 2)) : w);
 // товары Перекрёстка (perekrestok.js) и меню Додо (dodo.js)
-const STORE = [...(typeof STORE_PRODUCTS !== "undefined" ? STORE_PRODUCTS : []), ...(typeof DODO_PRODUCTS !== "undefined" ? DODO_PRODUCTS : [])];
+const STORE = [...(typeof STORE_PRODUCTS !== "undefined" ? STORE_PRODUCTS : []), ...(typeof DODO_PRODUCTS !== "undefined" ? DODO_PRODUCTS : []),
+  ...(typeof ALCOHOL_PRODUCTS !== "undefined" ? ALCOHOL_PRODUCTS : [])]; // алкоголь — расчёт по крепости (alcohol.js)
 const allProducts = () => [...S.products, ...BASE_PRODUCTS, ...STORE];
 const findProduct = id => allProducts().find(p => p.id === id);
 // Рецепт: сумма ингредиентов (сырой вес), делённая на вес готового блюда
@@ -386,7 +387,9 @@ function searchProducts(q) {
   // выше — где слова запроса целиком («сырок» раньше «сыра»), потом — начинается с запроса, потом недавние
   const rank = p => {
     const n = norm(p.name);
-    return (full.every(w => n.includes(w)) ? 0 : 4) + (n.startsWith(words[0]) ? 0 : 2) + (S.recent.includes(p.id) ? 0 : 1);
+    // слово с начала («сухое», а не внутри «полусухое») — выше
+    const atStart = full.every(w => new RegExp("(^|[^a-zа-я0-9])" + w).test(n));
+    return (atStart ? 0 : full.every(w => n.includes(w)) ? 4 : 8) + (n.startsWith(words[0]) ? 0 : 2) + (S.recent.includes(p.id) ? 0 : 1);
   };
   return hits.sort((a, b) => rank(a) - rank(b) || a.name.length - b.name.length);
 }
@@ -649,7 +652,7 @@ function productRows(list, action, q) {
       <button class="btn ghost" data-a="newProduct" data-name="${esc(q)}">Создать продукт «${esc(q)}»</button>`;
   }
   return list.map(p => `<button class="prod" data-a="${action}" data-id="${p.id}">
-      <span class="n">${esc(p.name)}${p.id[0] !== "b" && !p.id.startsWith("dd") ? `<span class="tag">${p.recipe ? "рецепт" : p.id.startsWith("pk") ? "Перекрёсток" : p.barcode ? "штрихкод" : "мой"}</span>` : ""}</span>
+      <span class="n">${esc(p.name)}${p.id[0] !== "b" && !p.id.startsWith("dd") && !p.id.startsWith("al") ? `<span class="tag">${p.recipe ? "рецепт" : p.id.startsWith("pk") ? "Перекрёсток" : p.barcode ? "штрихкод" : "мой"}</span>` : ""}</span>
       <span class="k">${r0(p.kcal)} ккал</span>
       <span class="m">на 100 г · Б ${fmt(p.p)} · Ж ${fmt(p.f)} · У ${fmt(p.c)}</span></button>`).join("");
 }
@@ -958,7 +961,7 @@ function gramsSheet(p, meal, entry) {
     <div class="chips">${portion
       ? [[0.5, "½ порции"], [1, "1 порция"], [1.5, "1½ порции"], [2, "2 порции"]].map(([k, l]) => `<button class="chip" data-a="setGrams" data-g="${r0(portion * k)}">${l} · ${r0(portion * k)} г</button>`).join("")
       : opts
-        ? opts.map(([l, g]) => `<button class="chip" data-a="setGrams" data-g="${g}">${esc(l)} · ${g} г</button>`).join("")
+        ? opts.map(([l, g]) => `<button class="chip" data-a="setGrams" data-g="${g}">${esc(l)}${/мл|л$/.test(l) ? "" : ` · ${g} г`}</button>`).join("")
       : pc
         ? [1, 2, 3, 4].map(k => `<button class="chip" data-a="setGrams" data-g="${pc[0] * k}">${k} ${pc[1]} · ${pc[0] * k} г</button>`).join("")
         : [30, 50, 100, 150, 200, 250, 300].map(g => `<button class="chip" data-a="setGrams" data-g="${g}">${g}</button>`).join("")}</div>
