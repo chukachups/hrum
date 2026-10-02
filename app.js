@@ -11,7 +11,7 @@ const ACTIVITY = [
   [1.45, "Работа на ногах", "Физический труд, весь день в движении"],
 ];
 const GOALS = {
-  cut: [-0.15, "Похудение", "Дефицит 15% — около 0,5 кг в неделю"],
+  cut: [-0.15, "Похудение", "Дефицит 15% — примерно 0,2–0,4 кг жира в неделю"],
   keep: [0, "Поддержание", "Держать текущий вес"],
   bulk: [0.10, "Набор", "Профицит 10% — рост мышц"],
 };
@@ -136,12 +136,63 @@ const ui = { view: "diary", day: dayKey(), addMeal: null, onPick: null, gctx: nu
 function targets(pr = S.profile) {
   const lbm = pr.weight * (1 - pr.bodyFat / 100);          // сухая масса
   const bmr = 370 + 21.6 * lbm;                              // Кетч-МакАрдл
-  const tdee = bmr * pr.activity;
+  const tdee = bmr * pr.activity * (pr.adjust || 1);        // adjust — поправка по реальной динамике веса
   const kcal = tdee * (1 + GOALS[pr.goal][0]);
   const p = (pr.goal === "cut" ? 2.2 : 2.0) * lbm;
-  const f = 0.9 * pr.weight;
+  // жиры — 30 % калорий, но не меньше 0,8 г на кг сухой массы; раньше было 0,9 г на кг всего веса,
+  // и при большом весе жиры съедали до половины нормы, а углеводов почти не оставалось
+  const f = Math.max(0.3 * kcal / 9, 0.8 * lbm);
   const c = Math.max(0, (kcal - p * 4 - f * 9) / 4);
   return { lbm, bmr, tdee, kcal, p, f, c };
+}
+
+// Ожидаемый темп по плану: кг жира в неделю (минус — похудение)
+const planKgWeek = t => (t.kcal - t.tdee) * 7 / 7700;
+
+// Автоподстройка нормы: за последние 3 недели (без сегодня) сравниваем записанную еду
+// с реальной динамикой веса. Еда − (расход + тренировки) = изменение веса × 7700 ккал
+// ⇒ реальный бытовой расход = еда − тренировки − наклон веса × 7700.
+// Заодно учитывается то, что записывается не всё или % жира с весов неточный.
+function adjustCalc() {
+  const pr = S.profile;
+  const end = shiftDay(dayKey(), -1);
+  const days = Array.from({ length: 21 }, (_, i) => shiftDay(end, i - 20));
+  const formula = targets({ ...pr, adjust: 1 }).tdee;
+  const full = days.map(dayData).filter(d => d.es.length && d.eaten.kcal >= d.limit * 0.5);
+  const ws = days.filter(k => S.weights[k]).map(k => [(parseDay(k) - parseDay(days[0])) / 864e5, S.weights[k].w]);
+  const span = ws.length ? ws[ws.length - 1][0] - ws[0][0] : 0;
+  const need = [];
+  if (full.length < 14) need.push(`ещё ${14 - full.length} ${plural(14 - full.length, ["день", "дня", "дней"])} с полностью записанной едой`);
+  if (ws.length < 4 || span < 14) need.push(ws.length < 4
+    ? `ещё ${4 - ws.length} ${plural(4 - ws.length, ["взвешивание", "взвешивания", "взвешиваний"])} (раз в 4–5 дней)`
+    : "взвешивания на протяжении хотя бы двух недель");
+  if (need.length) return { ready: false, need, days: full.length, weighs: ws.length };
+  const mx = ws.reduce((a, [x]) => a + x, 0) / ws.length, my = ws.reduce((a, [, y]) => a + y, 0) / ws.length;
+  const slope = ws.reduce((a, [x, y]) => a + (x - mx) * (y - my), 0) / ws.reduce((a, [x]) => a + (x - mx) ** 2, 0);
+  const intake = full.reduce((a, d) => a + d.eaten.kcal, 0) / full.length;
+  const burned = full.reduce((a, d) => a + d.burned, 0) / full.length;
+  const real = intake - burned - slope * 7700;
+  const factor = Math.min(1.2, Math.max(0.8, Math.round(real / formula * 100) / 100));
+  const cur = pr.adjust || 1;
+  const newKcal = targets({ ...pr, adjust: factor }).kcal;
+  return { ready: true, intake, burned, slope, real, formula, factor, newKcal,
+    suggest: Math.abs(factor - cur) >= 0.05, days: full.length, weighs: ws.length };
+}
+function adjustCard(a) {
+  const t = targets();
+  if (!a.ready) {
+    return `<p class="small"><b>Хрум уточнит норму по твоему весу.</b> Формула — хорошая оценка, но % жира с весов бывает неточным,
+      и не всё съеденное попадает в дневник. Для проверки нужно: ${a.need.join(" и ")}.</p>
+      <p class="muted small">Сейчас: ${a.days} из 14 дней с едой, ${a.weighs} ${plural(a.weighs, ["взвешивание", "взвешивания", "взвешиваний"])} за 3 недели.</p>`;
+  }
+  const wk = a.slope * 7;
+  const fact = `За 3 недели ты в среднем ел${S.profile.sex === "f" ? "а" : ""} <b>${r0(a.intake)} ккал</b>, а вес ${Math.abs(wk) < 0.05 ? "<b>почти не менялся</b>" : `${wk < 0 ? "уходил" : "прибавлялся"} на <b>${fmt(Math.abs(wk), 2)} кг в неделю</b>`}.
+    Значит, реальный расход — около <b>${r0(a.real)} ккал</b>, формула считала ${r0(a.formula)}.`;
+  if (!a.suggest) return `<p class="small">${fact}</p><p class="small">Норма совпадает с реальностью — менять ничего не нужно.</p>`;
+  return `<p class="small">${fact}</p>
+    <p class="small">Предлагаю поправить норму: <b>${r0(t.kcal)} → ${r0(a.newKcal)} ккал</b> в день.</p>
+    <button class="btn" data-a="applyAdjust" data-f="${a.factor}">Поправить норму</button>
+    <p class="muted small">Через пару недель Хрум проверит ещё раз. Поправку можно сбросить в Профиле.</p>`;
 }
 
 function navyBodyFat(sex, height, neck, waist, hip) {
@@ -440,6 +491,7 @@ function viewDiary() {
     <div class="brand"><img src="icons/icon-192.png" alt="">хрум</div>
   </header>
   ${installCard()}
+  ${isToday ? adjustNote() : ""}
 
   <section class="card hero" aria-label="Итог дня">
     ${S.skin === "cookie" ? cookieBlock(d) : `
@@ -483,6 +535,15 @@ function viewDiary() {
 
   <div class="section-title"><h2>Вес</h2><span>последние записи</span></div>
   ${weightCard()}`;
+}
+
+function adjustNote() {
+  if (S.adjustHide && shiftDay(S.adjustHide, 7) > dayKey()) return "";
+  const a = adjustCalc();
+  if (!a.ready || !a.suggest) return "";
+  return `<div class="card note-card"><b>Хрум может уточнить норму по твоему весу</b>
+    <span class="muted small">${r0(targets().kcal)} → ${r0(a.newKcal)} ккал — по 3 неделям записей и взвешиваний</span>
+    <div class="btn-row"><button class="btn ghost" data-a="tab" data-v="progress">Посмотреть</button><button class="btn ghost" data-a="hideAdjust">Позже</button></div></div>`;
 }
 
 /* Печенька: целая = лимит дня, 12 укусов */
@@ -652,6 +713,8 @@ function viewProgress() {
 
   return `<header class="top"><h1>Прогресс</h1></header>
     <section class="card">${stats}</section>
+    <div class="section-title"><h2>Точность нормы</h2><span>${S.profile.adjust && S.profile.adjust !== 1 ? `поправка ${S.profile.adjust > 1 ? "+" : "−"}${r0(Math.abs(S.profile.adjust - 1) * 100)}%` : "по динамике веса"}</span></div>
+    <section class="card adjust">${adjustCard(adjustCalc())}</section>
     <div class="section-title"><h2>Калории за 14 дней</h2><span>пунктир — норма</span></div>
     <section class="card chart">${kcalChart}</section>
     <div class="section-title"><h2>Вес</h2><span>${pts.length ? pts.length + " " + plural(pts.length, ["запись", "записи", "записей"]) : ""}</span></div>
@@ -671,9 +734,11 @@ function viewProfile() {
       <div class="kv"><span>Сухая масса</span><b>${fmt(t.lbm)} кг</b></div>
       <hr class="rule">
       <div class="kv"><span>Базовый обмен</span><b>${r0(t.bmr)} ккал</b></div>
-      <div class="kv"><span>${esc(act[1])} (×${act[0]})</span><b>${r0(t.tdee)} ккал</b></div>
+      <div class="kv"><span>${esc(act[1])} (×${act[0]})${p.adjust && p.adjust !== 1 ? ", с поправкой" : ""}</span><b>${r0(t.tdee)} ккал</b></div>
       <div class="kv"><span>Цель: ${GOALS[p.goal][1].toLowerCase()}</span><b>${r0(t.kcal)} ккал</b></div>
       <div class="kv"><span>Белки · Жиры · Углеводы</span><b>${r0(t.p)} · ${r0(t.f)} · ${r0(t.c)} г</b></div>
+      ${p.goal !== "keep" ? `<div class="kv"><span>Темп по плану</span><b>${planKgWeek(t) < 0 ? "−" : "+"}${fmt(Math.abs(planKgWeek(t)), 2)} кг ${p.goal === "cut" ? "жира " : ""}в неделю</b></div>` : ""}
+      ${p.adjust && p.adjust !== 1 ? `<div class="kv"><span>Поправка по весу</span><b>${p.adjust > 1 ? "+" : "−"}${r0(Math.abs(p.adjust - 1) * 100)}% <button class="link" data-a="resetAdjust">сбросить</button></b></div>` : ""}
     </section>
     <details class="card">
       <summary><b>Как считается норма</b></summary>
@@ -681,7 +746,9 @@ function viewProfile() {
       Он точнее обычных формул, потому что жир почти не тратит энергию, а мышцы тратят.</p>
       <p class="small">Базовый обмен умножается на бытовую активность без тренировок, затем корректируется под цель.
       Тренировки лимит не увеличивают: сожжённое на них идёт сверх дефицита и ускоряет похудение.</p>
-      <p class="small">Белок: ${p.goal === "cut" ? "2,2" : "2,0"} г на кг сухой массы. Жиры: 0,9 г на кг веса. Углеводы — остаток калорий.</p>
+      <p class="small">Белок: ${p.goal === "cut" ? "2,2" : "2,0"} г на кг сухой массы. Жиры: 30% калорий, но не меньше 0,8 г на кг сухой массы. Углеводы — остаток калорий.</p>
+      <p class="small">В первые недели весы обычно показывают больше — уходит вода. Через 3 недели записей Хрум сравнит план с реальным весом
+      и предложит поправить норму (экран «Прогресс»).</p>
     </details>
     <button class="btn" data-a="addWeight">Записать вес</button>
     <button class="btn ghost" data-a="editProfile">Изменить профиль</button>
@@ -807,7 +874,7 @@ function mountSetup() {
     if (!act) return err("Выбери активность.");
     if (!goal) return err("Выбери цель.");
     const first = !S.profile;
-    S.profile = { sex, age: r0(age), height, weight, bodyFat, activity: act, goal };
+    S.profile = { sex, age: r0(age), height, weight, bodyFat, activity: act, goal, ...(S.profile?.adjust ? { adjust: S.profile.adjust } : {}) };
     S.weights[dayKey()] = { w: weight, bf: bodyFat };
     save();
     ui.view = first ? "diary" : "profile";
@@ -1444,6 +1511,18 @@ const actions = {
     toast(`Рецепт «${d.name}» добавлен`);
   },
   editPartner() { partnerSheet(); },
+  applyAdjust(el) {
+    S.profile.adjust = +el.dataset.f;
+    S.adjustHide = dayKey();
+    save(); render();
+    toast(`Норма: ${r0(targets().kcal)} ккал в день`);
+  },
+  resetAdjust() {
+    delete S.profile.adjust;
+    save(); render();
+    toast(`Поправка сброшена. Норма: ${r0(targets().kcal)} ккал`);
+  },
+  hideAdjust() { S.adjustHide = dayKey(); save(); render(); },
   pasteLink() { pasteLinkSheet(); },
   openLink() {
     const m = ($("#linkIn").value || "").match(SHARE_HASH);
