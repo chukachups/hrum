@@ -217,7 +217,8 @@ function garnishOptions(d, meal) {
 
 const norm = s => String(s).toLowerCase().replace(/ё/g, "е").trim();
 const stem = w => (w.length > 4 ? w.slice(0, Math.max(3, w.length - 2)) : w);
-const allProducts = () => [...S.products, ...BASE_PRODUCTS];
+const STORE = typeof STORE_PRODUCTS !== "undefined" ? STORE_PRODUCTS : []; // товары Перекрёстка (perekrestok.js)
+const allProducts = () => [...S.products, ...BASE_PRODUCTS, ...STORE];
 const findProduct = id => allProducts().find(p => p.id === id);
 // Рецепт: сумма ингредиентов (сырой вес), делённая на вес готового блюда
 function recipeCalc(r) {
@@ -321,9 +322,14 @@ function searchProducts(q) {
     const rec = S.recent.map(findProduct).filter(Boolean);
     return [...rec, ...all.filter(p => !S.recent.includes(p.id))];
   }
-  const words = (nq.match(/[\p{L}\p{N}]+/gu) || []).map(stem);
+  const full = nq.match(/[\p{L}\p{N}]+/gu) || [];
+  const words = full.map(stem);
   const hits = all.filter(p => { const n = norm(p.name); return words.every(w => n.includes(w)); });
-  const rank = p => (norm(p.name).startsWith(words[0]) ? 0 : 1) * 2 + (S.recent.includes(p.id) ? 0 : 1);
+  // выше — где слова запроса целиком («сырок» раньше «сыра»), потом — начинается с запроса, потом недавние
+  const rank = p => {
+    const n = norm(p.name);
+    return (full.every(w => n.includes(w)) ? 0 : 4) + (n.startsWith(words[0]) ? 0 : 2) + (S.recent.includes(p.id) ? 0 : 1);
+  };
   return hits.sort((a, b) => rank(a) - rank(b) || a.name.length - b.name.length);
 }
 
@@ -575,7 +581,7 @@ function productRows(list, action, q) {
       <button class="btn ghost" data-a="newProduct" data-name="${esc(q)}">Создать продукт «${esc(q)}»</button>`;
   }
   return list.map(p => `<button class="prod" data-a="${action}" data-id="${p.id}">
-      <span class="n">${esc(p.name)}${p.id[0] !== "b" ? `<span class="tag">${p.recipe ? "рецепт" : p.barcode ? "штрихкод" : "мой"}</span>` : ""}</span>
+      <span class="n">${esc(p.name)}${p.id[0] !== "b" ? `<span class="tag">${p.recipe ? "рецепт" : p.id.startsWith("pk") ? "Перекрёсток" : p.barcode ? "штрихкод" : "мой"}</span>` : ""}</span>
       <span class="k">${r0(p.kcal)} ккал</span>
       <span class="m">на 100 г · Б ${fmt(p.p)} · Ж ${fmt(p.f)} · У ${fmt(p.c)}</span></button>`).join("");
 }
