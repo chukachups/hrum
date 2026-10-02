@@ -272,7 +272,8 @@ function garnishOptions(d, meal) {
 
 const norm = s => String(s).toLowerCase().replace(/ё/g, "е").trim();
 const stem = w => (w.length > 4 ? w.slice(0, Math.max(3, w.length - 2)) : w);
-const STORE = typeof STORE_PRODUCTS !== "undefined" ? STORE_PRODUCTS : []; // товары Перекрёстка (perekrestok.js)
+// товары Перекрёстка (perekrestok.js) и меню Додо (dodo.js)
+const STORE = [...(typeof STORE_PRODUCTS !== "undefined" ? STORE_PRODUCTS : []), ...(typeof DODO_PRODUCTS !== "undefined" ? DODO_PRODUCTS : [])];
 const allProducts = () => [...S.products, ...BASE_PRODUCTS, ...STORE];
 const findProduct = id => allProducts().find(p => p.id === id);
 // Рецепт: сумма ингредиентов (сырой вес), делённая на вес готового блюда
@@ -364,6 +365,8 @@ function parseRecipeHash() {
 // «2 шт · » — если вес записи ровно кратен весу штуки продукта
 function pieces(e) {
   const p = e.pid && findProduct(e.pid);
+  const opt = p && p.opts && p.opts.find(([, g]) => g === e.grams);
+  if (opt) return `${opt[0]} · `;
   if (!p || !p.pc) return "";
   const k = e.grams / p.pc;
   return Number.isInteger(k) && k <= 20 ? `${k} ${p.pcName || "шт"} · ` : "";
@@ -646,7 +649,7 @@ function productRows(list, action, q) {
       <button class="btn ghost" data-a="newProduct" data-name="${esc(q)}">Создать продукт «${esc(q)}»</button>`;
   }
   return list.map(p => `<button class="prod" data-a="${action}" data-id="${p.id}">
-      <span class="n">${esc(p.name)}${p.id[0] !== "b" ? `<span class="tag">${p.recipe ? "рецепт" : p.id.startsWith("pk") ? "Перекрёсток" : p.barcode ? "штрихкод" : "мой"}</span>` : ""}</span>
+      <span class="n">${esc(p.name)}${p.id[0] !== "b" && !p.id.startsWith("dd") ? `<span class="tag">${p.recipe ? "рецепт" : p.id.startsWith("pk") ? "Перекрёсток" : p.barcode ? "штрихкод" : "мой"}</span>` : ""}</span>
       <span class="k">${r0(p.kcal)} ккал</span>
       <span class="m">на 100 г · Б ${fmt(p.p)} · Ж ${fmt(p.f)} · У ${fmt(p.c)}</span></button>`).join("");
 }
@@ -941,12 +944,15 @@ function gramsSheet(p, meal, entry) {
   const portion = !entry && p.recipe && p.recipe.portions ? recipeWeight(p.recipe) / p.recipe.portions : 0;
   const piece = findProduct(entry ? entry.pid : p.id);
   const pc = piece && piece.pc ? [piece.pc, piece.pcName || "шт"] : null;
-  const g0 = entry ? entry.grams : portion || (pc ? pc[0] : 100);
+  const opts = piece && piece.opts; // готовые порции: «¼ пиццы», «1 порция»
+  const g0 = entry ? entry.grams : portion || (opts ? opts[0][1] : pc ? pc[0] : 100);
   ui.gctx = { p: per100, entry };
   openSheet(`<div><h2>${esc(per100.name)}</h2><p class="muted small">На 100 г: ${kbju(per100)}</p></div>
     <label class="field"><span>Сколько грамм</span><input id="grams" class="input" inputmode="decimal" value="${fmt(g0, 0)}"></label>
     <div class="chips">${portion
       ? [[0.5, "½ порции"], [1, "1 порция"], [1.5, "1½ порции"], [2, "2 порции"]].map(([k, l]) => `<button class="chip" data-a="setGrams" data-g="${r0(portion * k)}">${l} · ${r0(portion * k)} г</button>`).join("")
+      : opts
+        ? opts.map(([l, g]) => `<button class="chip" data-a="setGrams" data-g="${g}">${esc(l)} · ${g} г</button>`).join("")
       : pc
         ? [1, 2, 3, 4].map(k => `<button class="chip" data-a="setGrams" data-g="${pc[0] * k}">${k} ${pc[1]} · ${pc[0] * k} г</button>`).join("")
         : [30, 50, 100, 150, 200, 250, 300].map(g => `<button class="chip" data-a="setGrams" data-g="${g}">${g}</button>`).join("")}</div>
