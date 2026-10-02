@@ -20,6 +20,18 @@ const WORKOUTS = [
   ["Ходьба", 3.5], ["Быстрая ходьба", 4.5], ["Бег", 9.8], ["Велосипед", 7.5], ["Силовая", 5],
   ["Плавание", 6], ["Йога", 2.5], ["Футбол", 7], ["Лыжи", 9], ["Танцы", 5], ["Единоборства", 10], ["HIIT", 8],
 ];
+// Доли дня по приёмам — тот же совет, что для семьи (25/35/30/10 %)
+const MEAL_SHARE = { breakfast: 0.25, lunch: 0.35, dinner: 0.3, snack: 0.1 };
+// Гарниры для подсказки (вес в готовом виде) и чем каждый хорош
+const GARNISHES = {
+  breakfast: [["b11", "к яйцам и сыру — медленные углеводы"], ["b68", "сытно и мягко для утра"], ["b1", "много клетчатки"], ["b49", "быстро и без готовки"]],
+  main: [["b1", "много клетчатки, сытно"], ["b61", "медленные углеводы, почти без жира"], ["b62", "добавит белка"],
+    ["b3", "мягкий, почти без жира"], ["b63", "цельнозерновой, сытнее белого"], ["b9", "сытно и мало калорий"],
+    ["b7", "если нужно больше энергии"], ["b64", "белок и клетчатка"], ["b65", "растительный белок"], ["b66", "белок и клетчатка, сытно"]],
+};
+const LEGUMES = ["b62", "b65", "b66"]; // в подсказке не больше одного — иначе тройка из одной фасоли
+const WHOLE = ["b1", "b61", "b63", "b64", "b62", "b65", "b66", "b11", "b68"]; // цельные: клетчатка — небольшой бонус
+const VEGGIES = ["b47", "b67"];
 const MONTHS = ["января", "февраля", "марта", "апреля", "мая", "июня", "июля", "августа", "сентября", "октября", "ноября", "декабря"];
 const WEEKDAYS = ["воскресенье", "понедельник", "вторник", "среда", "четверг", "пятница", "суббота"];
 
@@ -154,6 +166,53 @@ function dayData(k) {
   return { es, ws, eaten, burned, t, limit: t.kcal };
 }
 
+const KEYS = ["kcal", "p", "f", "c"];
+function mealSum(d, meal) {
+  const m = { kcal: 0, p: 0, f: 0, c: 0 };
+  for (const e of d.es) if (e.meal === meal) for (const k of KEYS) m[k] += e[k];
+  return m;
+}
+// Сколько уложить в приём: остаток дня за вычетом других приёмов,
+// поделённый между этим и следующими пустыми приёмами по их долям
+function mealTarget(d, meal) {
+  const order = MEALS.map(m => m[0]);
+  const i = order.indexOf(meal);
+  const open = order.filter((k, j) => k === meal || (j > i && !d.es.some(e => e.meal === k)));
+  const share = MEAL_SHARE[meal] / open.reduce((s, k) => s + MEAL_SHARE[k], 0);
+  const goal = { kcal: d.limit, p: d.t.p, f: d.t.f, c: d.t.c };
+  const other = { kcal: 0, p: 0, f: 0, c: 0 };
+  for (const e of d.es) if (e.meal !== meal) for (const k of KEYS) other[k] += e[k];
+  const T = {};
+  for (const k of KEYS) T[k] = Math.max(0, goal[k] - other[k]) * share;
+  return T;
+}
+// Подсказка нужна, если в приёме есть белковое блюдо, а углеводов меньше половины нужного
+function needsGarnish(d, meal) {
+  if (meal === "snack") return false;
+  const m = mealSum(d, meal), T = mealTarget(d, meal);
+  return m.kcal >= 80 && m.p >= 10 && T.c >= 20 && m.c < T.c * 0.5;
+}
+// Вес гарнира — чтобы добрать углеводы приёма, не выходя за его калории;
+// лучшие — те, после которых углеводы (главное) и белки приёма ближе всего к нужным
+function garnishOptions(d, meal) {
+  const T = mealTarget(d, meal), m = mealSum(d, meal);
+  const opts = [];
+  for (const [id, why] of GARNISHES[meal === "breakfast" ? "breakfast" : "main"]) {
+    const p = findProduct(id);
+    if (!p) continue;
+    let g = Math.min((T.c - m.c) / p.c * 100, (T.kcal - m.kcal) / p.kcal * 100);
+    g = Math.min(meal === "breakfast" ? 200 : 250, Math.round(g / 10) * 10);
+    if (g < 40) continue;
+    const v = {};
+    for (const k of KEYS) v[k] = m[k] + p[k] * g / 100;
+    const score = [["c", 1], ["p", 0.3]].reduce((s, [k, wt]) => s + (T[k] ? wt * ((v[k] - T[k]) / T[k]) ** 2 : 0), 0);
+    opts.push({ p, g, why, v, score: score * (WHOLE.includes(id) ? 0.6 : 1) });
+  }
+  opts.sort((a, b) => a.score - b.score);
+  const legume = opts.find(o => LEGUMES.includes(o.p.id));
+  return { T, m, opts: opts.filter(o => !LEGUMES.includes(o.p.id) || o === legume).slice(0, 3) };
+}
+
 /* ================= Продукты ================= */
 
 const norm = s => String(s).toLowerCase().replace(/ё/g, "е").trim();
@@ -201,6 +260,30 @@ function parseNormHash() {
     const w = +d.w, k = +d.k;
     if (!(k >= 800 && k <= 6000) || !(w >= 30 && w <= 300)) return null;
     return { weight: w, kcal: k, date: /^\d{4}-\d\d-\d\d$/.test(d.d) ? d.d : dayKey() };
+  } catch (e) {
+    return null;
+  }
+}
+// «Поделиться едой»: приём или весь день; у получателя граммы пересчитываются под его норму
+function foodLink(meal) {
+  const r1 = x => Math.round(x * 10) / 10;
+  const es = (S.entries[ui.day] || []).filter(e => !meal || e.meal === meal);
+  return location.origin + location.pathname + "#food=" + packLink({
+    k: r0(targets().kcal), m: meal || "",
+    i: es.map(e => [e.meal, e.name, r0(e.grams), ...KEYS.map(k => r1(e[k] / e.grams * 100))]),
+  });
+}
+function parseFoodHash() {
+  const m = location.hash.match(/^#food=([\w-]+)$/);
+  if (!m) return null;
+  try {
+    const d = unpackLink(m[1]);
+    const meals = MEALS.map(x => x[0]);
+    const items = d.i.map(([meal, name, grams, kcal, pp, f, c]) => ({
+      meal: meals.includes(meal) ? meal : "snack", name: String(name).slice(0, 120), grams: +grams, kcal: +kcal, p: +pp, f: +f, c: +c }));
+    if (!items.length || items.length > 80 || items.some(x => !(x.grams > 0) || ![x.kcal, x.p, x.f, x.c].every(Number.isFinite))) return null;
+    const k = +d.k;
+    return { kcal: k >= 800 && k <= 6000 ? k : null, meal: meals.includes(d.m) ? d.m : null, items };
   } catch (e) {
     return null;
   }
@@ -279,6 +362,7 @@ const ICONS = {
   scan: '<path d="M4 8V5a1 1 0 0 1 1-1h3M16 4h3a1 1 0 0 1 1 1v3M20 16v3a1 1 0 0 1-1 1h-3M8 20H5a1 1 0 0 1-1-1v-3M8 8v8M11 8v8M14 8v8M17 8v8"/>',
   chart: '<path d="M4 19V5M4 19h16M8 15l4-4 3 3 5-6"/>',
   user: '<circle cx="12" cy="8" r="4"/><path d="M4 21c1.5-4 4.5-6 8-6s6.5 2 8 6"/>',
+  share: '<path d="M12 15V3M7 8l5-5 5 5"/><path d="M5 13v6a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-6"/>',
   run: '<circle cx="14" cy="4" r="2"/><path d="M8 21l3-6 3 3v3M6 12l3-3 4 1 3 3h3M11 15l-1-4"/>',
 };
 const icon = (k, size = 22) => `<svg width="${size}" height="${size}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${ICONS[k]}</svg>`;
@@ -320,9 +404,12 @@ function viewDiary() {
           <span class="n">${esc(e.name)}</span><span class="k">${r0(e.kcal)}</span>
           <span class="g">${fmt(e.grams, 0)} г</span><span class="m">Б ${r0(e.p)} · Ж ${r0(e.f)} · У ${r0(e.c)}</span></button>`).join("")
       : `<div class="empty">Пусто</div>`;
+    const hint = items.length && needsGarnish(d, key)
+      ? `<button class="garnish-hint" data-a="garnish" data-meal="${key}">Без гарнира? Подобрать под норму дня</button>` : "";
     return `<article class="meal">
       <div class="meal-head"><h3>${title}</h3><span class="kc">${kc ? r0(kc) + " ккал" : ""}</span>
-        <button class="add" data-a="addFood" data-meal="${key}" aria-label="Добавить: ${title}">+</button></div>${body}</article>`;
+        ${items.length ? `<button class="add share" data-a="shareMeal" data-meal="${key}" aria-label="Поделиться: ${title}">${icon("share", 16)}</button>` : ""}
+        <button class="add" data-a="addFood" data-meal="${key}" aria-label="Добавить: ${title}">+</button></div>${body}${hint}</article>`;
   }).join("");
 
   const workouts = d.ws.map(w => `<button class="row-card" data-a="editWorkout" data-id="${w.id}">
@@ -375,6 +462,7 @@ function viewDiary() {
 
   <div class="section-title"><h2>Приёмы пищи</h2><span>${d.es.length ? d.es.length + " " + plural(d.es.length, ["запись", "записи", "записей"]) : "нажми +, чтобы добавить"}</span></div>
   ${meals}
+  ${d.es.length ? `<button class="row-card dashed" data-a="shareDay">${icon("share", 18)} Отправить меню дня</button>` : ""}
 
   <div class="section-title"><h2>Активность</h2><span>${burned ? "−" + r0(burned) + " ккал, в лимит не входят" : "ускоряет похудение"}</span></div>
   ${workouts}
@@ -984,6 +1072,79 @@ function incomingRecipeSheet(data) {
   ui.incoming = data;
 }
 
+function garnishSheet(meal) {
+  const d = dayData(ui.day);
+  const { T, m, opts } = garnishOptions(d, meal);
+  const line = v => `${r0(v.kcal)} ккал · Б ${r0(v.p)} · Ж ${r0(v.f)} · У ${r0(v.c)}`;
+  openSheet(`<div><h2>Гарнир: ${mealName(meal).toLowerCase()}</h2>
+    <p class="muted small">С учётом остальной еды за день сюда стоит уложить примерно <b>${line(T)}</b>. Сейчас: ${line(m)}.</p></div>
+    ${m.f > T.f * 1.1 ? `<p class="small">Жира в приёме уже больше нужного — гарнир лучше без масла и соусов.</p>` : ""}
+    ${opts.length ? opts.map((o, i) => `<div class="card garnish">
+        <div class="kv"><b>${esc(o.p.name)}, ${o.g} г</b><span>${r0(o.p.kcal * o.g / 100)} ккал</span></div>
+        <p class="muted small">${i === 0 ? "Лучше всего по балансу: " : ""}${o.why}. Приём станет: ${line(o.v)}</p>
+        <button class="btn ghost" data-a="addGarnish" data-id="${o.p.id}" data-g="${o.g}" data-meal="${meal}">Добавить ${o.g} г</button></div>`).join("")
+      : `<p>На гарнир калорий почти не осталось — лучше добавить овощи.</p>`}
+    <h3>Овощи — к любому гарниру</h3>
+    <div class="chips">${VEGGIES.map(id => findProduct(id)).map(p => `<button class="chip" data-a="addGarnish" data-id="${p.id}" data-g="150" data-meal="${meal}">+ ${esc(p.name)}, 150 г</button>`).join("")}</div>
+    <p class="muted small">Вес гарнира — в готовом виде. Добавленное можно поправить, нажав на него в дневнике.</p>
+    <button class="btn ghost" data-a="closeSheet">Закрыть</button>`);
+}
+
+function incomingFoodSheet(data) {
+  ui.incomingFood = data;
+  const mine = targets().kcal;
+  const ratio = data.kcal ? Math.min(2, Math.max(0.5, mine / data.kcal)) : 1;
+  const scaled = Math.abs(ratio - 1) > 0.02;
+  openSheet(`<h2>${data.meal ? `Тебе прислали: ${mealName(data.meal).toLowerCase()}` : "Тебе прислали меню на день"}</h2>
+    ${scaled ? `<p class="muted small">Прислано под норму ${data.kcal} ккал, твоя — ${r0(mine)}. Граммы пересчитаны под тебя (×${fmt(ratio, 2)}), их можно поправить.</p>
+      <div class="seg" id="fScale"><button data-a="pick" data-val="${ratio}" aria-pressed="true">Под мою норму</button><button data-a="pick" data-val="1" aria-pressed="false">Как прислали</button></div>` : ""}
+    <div class="card form">${data.items.map((x, i) => `<label class="share-row">
+        <span><b>${esc(x.name)}</b><small>${data.meal ? "" : mealName(x.meal) + " · "}${r0(x.kcal)} ккал на 100 г</small></span>
+        <input class="input" inputmode="decimal" data-i="${i}"><span>г</span></label>`).join("")}</div>
+    ${data.meal ? `<div class="seg" id="fMeal">${MEALS.map(([k, t]) => `<button data-a="pick" data-val="${k}" aria-pressed="${k === data.meal}">${t}</button>`).join("")}</div>` : ""}
+    <div class="seg" id="fDay"><button data-a="pick" data-val="${dayKey()}" aria-pressed="true">Сегодня</button><button data-a="pick" data-val="${shiftDay(dayKey(), -1)}" aria-pressed="false">Вчера</button></div>
+    <div class="card preview" id="fPrev"></div>
+    <button class="btn" data-a="importFood">Добавить в дневник</button>
+    <button class="btn ghost" data-a="closeSheet">Не нужно</button>`, data.items.length > 4);
+  const inputs = [...document.querySelectorAll("#sheetBody input[data-i]")];
+  const fill = r => inputs.forEach(inp => { inp.value = Math.max(5, Math.round(data.items[inp.dataset.i].grams * r / 5) * 5); });
+  const upd = () => {
+    const t = { kcal: 0, p: 0, f: 0, c: 0 };
+    for (const inp of inputs) {
+      const x = data.items[inp.dataset.i], k = (num(inp.value) || 0) / 100;
+      for (const q of KEYS) t[q] += x[q] * k;
+    }
+    $("#fPrev").innerHTML = `<span><b>${r0(t.kcal)}</b> ккал</span><span>Б ${r0(t.p)}</span><span>Ж ${r0(t.f)}</span><span>У ${r0(t.c)}</span>`;
+  };
+  let cur = scaled ? ratio : 1;
+  fill(cur); upd();
+  inputs.forEach(inp => inp.addEventListener("input", upd));
+  // выбор дня или приёма не сбрасывает поправленные граммы — только смена «под мою норму / как прислали»
+  ui.onPick = () => {
+    const r = +($('#fScale [aria-pressed="true"]')?.dataset.val || 1);
+    if (r !== cur) { cur = r; fill(r); upd(); }
+  };
+}
+
+async function shareFood(meal) {
+  const url = foodLink(meal);
+  const text = meal
+    ? `${mealName(meal)} из Хрума — откроется с граммами под твою норму:`
+    : "Моё меню на день из Хрума — откроется с граммами под твою норму:";
+  if (navigator.share) {
+    try { await navigator.share({ title: "Еда из Хрума", text, url }); return; }
+    catch (e) { if (e.name === "AbortError") return; }
+  }
+  try {
+    await navigator.clipboard.writeText(`${text} ${url}`);
+    toast("Ссылка скопирована — отправь её в мессенджер");
+  } catch (e) {
+    openSheet(`<h2>Ссылка на еду</h2><p class="muted small">Скопируй и отправь в мессенджер:</p>
+      <textarea class="input" rows="4" readonly>${esc(url)}</textarea>
+      <button class="btn ghost" data-a="closeSheet">Готово</button>`);
+  }
+}
+
 function workoutSheet() {
   openSheet(`<h2>Тренировка</h2>
     <div class="chips" id="wType">${WORKOUTS.map(([n], i) => `<button class="chip" data-a="pick" data-val="${i}" aria-pressed="${i === 0}">${n}</button>`).join("")}</div>
@@ -1241,6 +1402,35 @@ const actions = {
     toast(`Рецепт «${d.name}» добавлен`);
   },
   editPartner() { partnerSheet(); },
+  shareMeal(el) { shareFood(el.dataset.meal); },
+  shareDay() { shareFood(null); },
+  garnish(el) { garnishSheet(el.dataset.meal); },
+  addGarnish(el) {
+    const p = findProduct(el.dataset.id), g = +el.dataset.g, k = g / 100;
+    (S.entries[ui.day] ||= []).push({ id: uid(), pid: p.id, name: p.name, meal: el.dataset.meal, grams: g,
+      kcal: p.kcal * k, p: p.p * k, f: p.f * k, c: p.c * k });
+    touchRecent(p.id);
+    save(); closeSheet(); render();
+    toast(`Хрум! +${r0(p.kcal * k)} ккал`);
+  },
+  importFood() {
+    const d = ui.incomingFood;
+    const day = $('#fDay [aria-pressed="true"]').dataset.val;
+    const meal = d.meal && $('#fMeal [aria-pressed="true"]').dataset.val;
+    let n = 0, kc = 0;
+    for (const inp of document.querySelectorAll("#sheetBody input[data-i]")) {
+      const g = num(inp.value);
+      if (!g || g <= 0 || g > 5000) continue;
+      const x = d.items[inp.dataset.i], k = g / 100;
+      (S.entries[day] ||= []).push({ id: uid(), pid: null, name: x.name, meal: meal || x.meal, grams: g,
+        kcal: x.kcal * k, p: x.p * k, f: x.f * k, c: x.c * k });
+      n++; kc += x.kcal * k;
+    }
+    if (!n) { toast("Укажи граммы"); return; }
+    ui.incomingFood = null; ui.day = day; ui.view = "diary";
+    save(); closeSheet(); render();
+    toast(`Добавлено: ${n} ${plural(n, ["продукт", "продукта", "продуктов"])}, ${r0(kc)} ккал`);
+  },
   async shareNorm() {
     const url = normLink();
     const text = `Моя норма в Хруме: вес ${fmt(S.profile.weight)} кг, ${r0(targets().kcal)} ккал в день. Открой ссылку, чтобы обновить:`;
@@ -1456,6 +1646,12 @@ function render() {
     history.replaceState(null, "", location.pathname);
     if (n) incomingNormSheet(n); else toast("Ссылка с нормой повреждена");
   }
+  // ссылка «Поделиться едой» (приём или день)
+  if (S.profile && location.hash.startsWith("#food=") && $("#sheet").hidden) {
+    const data = parseFoodHash();
+    history.replaceState(null, "", location.pathname);
+    if (data) incomingFoodSheet(data); else toast("Ссылка на еду повреждена");
+  }
   // ссылка «Поделиться рецептом»
   if (S.profile && location.hash.startsWith("#recipe=") && $("#sheet").hidden) {
     const data = parseRecipeHash();
@@ -1471,7 +1667,7 @@ window.addEventListener("beforeinstallprompt", e => {
 });
 // ссылка с рецептом или нормой открыта, когда Хрум уже был открыт
 window.addEventListener("hashchange", () => {
-  if (/^#(recipe|norm)=/.test(location.hash)) { closeSheet(); render(); }
+  if (/^#(recipe|norm|food)=/.test(location.hash)) { closeSheet(); render(); }
 });
 window.addEventListener("appinstalled", () => { ui.installPrompt = null; toast("Хрум установлен!"); });
 // Смена даты, пока приложение открыто в фоне

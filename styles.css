@@ -118,6 +118,17 @@ h2 { font-weight: 500; font-size: 17px; margin: 0; }
   border: 0; background: var(--accent-soft); color: var(--accent); width: 32px; height: 32px; border-radius: 50%;
   font-size: 20px; line-height: 1; display: grid; place-items: center;
 }
+.add.share { background: transparent; color: var(--muted); }
+.garnish-hint {
+  width: 100%; border: 0; border-top: 1px solid var(--line); background: none; text-align: left; padding: 10px 0 12px;
+  color: var(--accent); font-weight: 600; font-size: 14px;
+}
+.garnish { display: grid; gap: 8px; }
+.garnish p { margin: 0; }
+.share-row { display: grid; grid-template-columns: 1fr 76px auto; align-items: center; gap: 8px; }
+.share-row small { display: block; color: var(--muted); font-size: 12.5px; }
+.share-row b { font-weight: 500; overflow-wrap: anywhere; }
+.share-row .input { padding: 9px 10px; text-align: right; }
 .item {
   width: 100%; border: 0; background: none; text-align: left; padding: 10px 0; border-top: 1px solid var(--line);
   display: grid; grid-template-columns: 1fr auto; gap: 2px 10px;
@@ -134,7 +145,7 @@ h2 { font-weight: 500; font-size: 17px; margin: 0; }
 .row-card .t b { display: block; font-weight: 600; }
 .row-card .t span { font-size: 13px; color: var(--muted); }
 .row-card .p { font-weight: 600; color: var(--accent); }
-.dashed { border: 1.5px dashed var(--line); background: transparent; color: var(--muted); justify-content: center; font-weight: 500; }
+.dashed { border: 1.5px dashed var(--line); background: transparent; color: var(--muted); justify-content: center; font-weight: 500; gap: 8px; }
 
 .weight { display: grid; grid-template-columns: auto 1fr; gap: 14px; align-items: center; width: 100%; border: 0; text-align: left; }
 .weight .w { font-family: var(--display); font-weight: 700; font-size: 24px; }
