@@ -186,11 +186,11 @@ function mealTarget(d, meal) {
   for (const k of KEYS) T[k] = Math.max(0, goal[k] - other[k]) * share;
   return T;
 }
-// Подсказка нужна, если в приёме есть белковое блюдо, а углеводов меньше половины нужного
+// Подсказка нужна, если в приёме есть белковое блюдо, а углеводов почти нет (гарнира нет совсем)
 function needsGarnish(d, meal) {
   if (meal === "snack") return false;
   const m = mealSum(d, meal), T = mealTarget(d, meal);
-  return m.kcal >= 80 && m.p >= 10 && T.c >= 20 && m.c < T.c * 0.5;
+  return m.kcal >= 80 && m.p >= 10 && T.c >= 20 && m.c < Math.min(meal === "breakfast" ? 10 : 15, T.c * 0.5);
 }
 // Вес гарнира — чтобы добрать углеводы приёма, не выходя за его калории;
 // лучшие — те, после которых углеводы (главное) и белки приёма ближе всего к нужным
@@ -305,6 +305,13 @@ function parseRecipeHash() {
   }
 }
 
+// «2 шт · » — если вес записи ровно кратен весу штуки продукта
+function pieces(e) {
+  const p = e.pid && findProduct(e.pid);
+  if (!p || !p.pc) return "";
+  const k = e.grams / p.pc;
+  return Number.isInteger(k) && k <= 20 ? `${k} ${p.pcName || "шт"} · ` : "";
+}
 const kbju = p => `${r0(p.kcal)} ккал · Б ${fmt(p.p)} · Ж ${fmt(p.f)} · У ${fmt(p.c)}`;
 
 function searchProducts(q) {
@@ -402,10 +409,10 @@ function viewDiary() {
     const body = items.length
       ? items.map(e => `<button class="item" data-a="editEntry" data-id="${e.id}">
           <span class="n">${esc(e.name)}</span><span class="k">${r0(e.kcal)}</span>
-          <span class="g">${fmt(e.grams, 0)} г</span><span class="m">Б ${r0(e.p)} · Ж ${r0(e.f)} · У ${r0(e.c)}</span></button>`).join("")
+          <span class="g">${pieces(e)}${fmt(e.grams, 0)} г</span><span class="m">Б ${r0(e.p)} · Ж ${r0(e.f)} · У ${r0(e.c)}</span></button>`).join("")
       : `<div class="empty">Пусто</div>`;
     const hint = items.length && needsGarnish(d, key)
-      ? `<button class="garnish-hint" data-a="garnish" data-meal="${key}">Без гарнира? Подобрать под норму дня</button>` : "";
+      ? `<button class="garnish-hint" data-a="garnish" data-meal="${key}">${key === "breakfast" ? "Мало углеводов? Подобрать к завтраку" : "Нет гарнира? Подобрать под норму дня"}</button>` : "";
     return `<article class="meal">
       <div class="meal-head"><h3>${title}</h3><span class="kc">${kc ? r0(kc) + " ккал" : ""}</span>
         ${items.length ? `<button class="add share" data-a="shareMeal" data-meal="${key}" aria-label="Поделиться: ${title}">${icon("share", 16)}</button>` : ""}
@@ -678,6 +685,7 @@ function viewProfile() {
       <span>${S.partner ? `норма ${r0(S.partner.kcal)} ккал${S.partner.weight ? ` · вес ${fmt(S.partner.weight)} кг` : ""}${S.partner.date ? ` · от ${shortDate(S.partner.date)}` : ""}` : "укажи норму — Хрум будет делить блюда пропорционально"}</span></span>
       <span class="p">›</span></button>
     <button class="btn ghost" data-a="shareNorm">Отправить мою норму</button>
+    <button class="btn ghost" data-a="pasteLink">Вставить ссылку</button>
     <div class="section-title"><h2>Оформление</h2></div>
     <div class="seg">
       <button data-a="setSkin" data-v="green" aria-pressed="${S.skin !== "cookie"}">Зелёный</button>
@@ -713,12 +721,34 @@ function mountProfile() {
 
 /* ================= Экран: заполнение профиля ================= */
 
+const SHARE_HASH = /#(recipe|norm|food)=[\w-]+/;
+// Ссылка открылась там, где Хрум ещё не заполнен (на iPhone — Safari, а Хрум живёт на иконке)
+function linkCard() {
+  const m = location.hash.match(SHARE_HASH);
+  if (S.profile || !m) return "";
+  const what = { recipe: "рецепт", norm: "норму", food: "еду" }[m[1]];
+  return `<div class="card link-card"><h2>Тебе прислали ${what}</h2>
+    <p class="muted small">Если Хрум уже стоит у тебя на главном экране, ссылка открылась не там: у иконки своя память.
+    Скопируй ссылку, открой Хрум с иконки и нажми в Профиле «Вставить ссылку».</p>
+    <button class="btn" data-a="copyLink">Скопировать ссылку</button>
+    <p class="muted small">Хрума на главном экране ещё нет? Заполни профиль ниже — и ${what === "норму" ? "норма" : what === "рецепт" ? "рецепт" : "еда"} откроется сразу после этого.</p></div>`;
+}
+function pasteLinkSheet() {
+  openSheet(`<h2>Вставить ссылку</h2>
+    <p class="muted small">Ссылка на рецепт, еду или норму, которую тебе прислали. Скопируй её в мессенджере и вставь сюда.</p>
+    <textarea id="linkIn" class="input" rows="3" placeholder="https://chukachups.github.io/hrum/#…"></textarea>
+    <p id="linkErr" class="note" style="color:var(--danger)" hidden>Это не ссылка Хрума — скопируй её целиком.</p>
+    <button class="btn" data-a="openLink">Открыть</button>`);
+  // если буфер обмена доступен — вставим сами
+  navigator.clipboard?.readText?.().then(t => { if (SHARE_HASH.test(t) && $("#linkIn") && !$("#linkIn").value) $("#linkIn").value = t.trim(); }).catch(() => {});
+}
 function viewSetup() {
   const p = S.profile || {};
   const seg = (group, val, label) => `<button type="button" data-a="pick" data-val="${val}" aria-pressed="${p[group] === val}">${label}</button>`;
   const opt = (val, title, sub, cur) => `<button type="button" class="option" data-a="pick" data-val="${val}" aria-pressed="${cur === val}"><b>${title}</b><span>${sub}</span></button>`;
   return `<header class="top"><div class="brand" style="font-size:22px"><img src="icons/icon-192.png" alt="" style="width:34px;height:34px">хрум</div></header>
-  ${S.profile ? "" : installCard(IS_IOS)}
+  ${linkCard()}
+  ${S.profile || location.hash.match(SHARE_HASH) ? "" : installCard(IS_IOS)}
   ${S.profile ? "<h1>Профиль</h1>" : `<div class="card"><h2>Привет!</h2><p class="muted">Хрум считает калории от сухой массы тела — это точнее обычных калькуляторов. Заполни профиль, и я посчитаю твою норму.</p></div>`}
   <form id="setupForm" class="form" novalidate>
     <div class="field"><span>Пол</span><div class="seg" id="fSex">${seg("sex", "m", "Мужской")}${seg("sex", "f", "Женский")}</div></div>
@@ -832,13 +862,17 @@ function gramsSheet(p, meal, entry) {
     ? { id: entry.pid, name: entry.name, kcal: entry.kcal / entry.grams * 100, p: entry.p / entry.grams * 100, f: entry.f / entry.grams * 100, c: entry.c / entry.grams * 100 }
     : p;
   const portion = !entry && p.recipe && p.recipe.portions ? recipeWeight(p.recipe) / p.recipe.portions : 0;
-  const g0 = entry ? entry.grams : portion || 100;
+  const piece = findProduct(entry ? entry.pid : p.id);
+  const pc = piece && piece.pc ? [piece.pc, piece.pcName || "шт"] : null;
+  const g0 = entry ? entry.grams : portion || (pc ? pc[0] : 100);
   ui.gctx = { p: per100, entry };
   openSheet(`<div><h2>${esc(per100.name)}</h2><p class="muted small">На 100 г: ${kbju(per100)}</p></div>
     <label class="field"><span>Сколько грамм</span><input id="grams" class="input" inputmode="decimal" value="${fmt(g0, 0)}"></label>
     <div class="chips">${portion
       ? [[0.5, "½ порции"], [1, "1 порция"], [1.5, "1½ порции"], [2, "2 порции"]].map(([k, l]) => `<button class="chip" data-a="setGrams" data-g="${r0(portion * k)}">${l} · ${r0(portion * k)} г</button>`).join("")
-      : [30, 50, 100, 150, 200, 250, 300].map(g => `<button class="chip" data-a="setGrams" data-g="${g}">${g}</button>`).join("")}</div>
+      : pc
+        ? [1, 2, 3, 4].map(k => `<button class="chip" data-a="setGrams" data-g="${pc[0] * k}">${k} ${pc[1]} · ${pc[0] * k} г</button>`).join("")
+        : [30, 50, 100, 150, 200, 250, 300].map(g => `<button class="chip" data-a="setGrams" data-g="${g}">${g}</button>`).join("")}</div>
     <div class="seg" id="mealSeg">${MEALS.map(([k, t]) => `<button data-a="pick" data-val="${k}" aria-pressed="${k === meal}">${t}</button>`).join("")}</div>
     <div class="card preview" id="gprev"></div>
     <button class="btn" data-a="saveGrams">${entry ? "Сохранить" : "Добавить"}</button>
@@ -1255,7 +1289,9 @@ async function scanSheet() {
       scanMsg("Камера никак не прочитает код. Введи цифры, которые напечатаны под полосками, — так быстрее.", true);
     }, 15000);
   } catch (e) {
-    $("#codeForm").hidden = false;
+    const form = $("#codeForm");
+    if (!form) return; // лист уже закрыли
+    form.hidden = false;
     scanMsg("Камера недоступна. Разреши доступ к камере в настройках браузера, выбери фото штрихкода или введи цифры под полосками.", true);
   }
 }
@@ -1321,7 +1357,7 @@ const actions = {
   manualCode() { $("#codeForm").hidden = false; $("#codeInput").focus(); },
   newProduct(el) {
     if ($("#sheet").hidden) ui.addMeal = null;
-    productFormSheet({ name: el.dataset.name || "" });
+    productFormSheet({ name: el.dataset.name || $("#fsearch")?.value.trim() || "" });
   },
   pickProduct(el) { gramsSheet(findProduct(el.dataset.id), ui.addMeal || mealByTime()); },
   openProduct(el) { productSheet(findProduct(el.dataset.id)); },
@@ -1344,7 +1380,7 @@ const actions = {
   rIngAdd() { syncDraft(); recipeIngSearch(); },
   rIngPick(el) { recipeIngGrams(ingredientFrom(findProduct(el.dataset.id)), null); },
   rScan() { ui.scanTarget = "recipe"; scanSheet(); },
-  rNewProduct(el) { ui.scanTarget = "recipe"; productFormSheet({ name: el.dataset.name || "" }); },
+  rNewProduct(el) { ui.scanTarget = "recipe"; productFormSheet({ name: el.dataset.name || $("#isearch")?.value.trim() || "" }); },
   rIngEdit(el) { syncDraft(); const i = +el.dataset.i; recipeIngGrams(ui.rd.items[i], i); },
   rIngSave() {
     const g = num($("#igrams").value);
@@ -1402,6 +1438,21 @@ const actions = {
     toast(`Рецепт «${d.name}» добавлен`);
   },
   editPartner() { partnerSheet(); },
+  pasteLink() { pasteLinkSheet(); },
+  openLink() {
+    const m = ($("#linkIn").value || "").match(SHARE_HASH);
+    if (!m) { $("#linkErr").hidden = false; return; }
+    closeSheet();
+    location.hash = m[0]; // дальше — как при открытии ссылки (hashchange)
+  },
+  async copyLink() {
+    try { await navigator.clipboard.writeText(location.href); toast("Скопировано — теперь открой Хрум с иконки"); }
+    catch (e) {
+      openSheet(`<h2>Ссылка</h2><p class="muted small">Выдели и скопируй:</p>
+        <textarea class="input" rows="4" readonly>${esc(location.href)}</textarea>
+        <button class="btn ghost" data-a="closeSheet">Готово</button>`);
+    }
+  },
   shareMeal(el) { shareFood(el.dataset.meal); },
   shareDay() { shareFood(null); },
   garnish(el) { garnishSheet(el.dataset.meal); },

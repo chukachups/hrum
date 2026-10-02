@@ -124,6 +124,8 @@ h2 { font-weight: 500; font-size: 17px; margin: 0; }
   color: var(--accent); font-weight: 600; font-size: 14px;
 }
 .garnish { display: grid; gap: 8px; }
+.link-card { display: grid; gap: 10px; border: 1.5px solid var(--accent); }
+.link-card h2, .link-card p { margin: 0; }
 .garnish p { margin: 0; }
 .share-row { display: grid; grid-template-columns: 1fr 76px auto; align-items: center; gap: 8px; }
 .share-row small { display: block; color: var(--muted); font-size: 12.5px; }
@@ -234,6 +236,7 @@ h2 { font-weight: 500; font-size: 17px; margin: 0; }
 .toast {
   position: fixed; left: 50%; top: calc(12px + env(safe-area-inset-top, 0px)); transform: translateX(-50%); z-index: 30; box-shadow: 0 8px 24px -10px rgba(0,0,0,.5);
   background: var(--ink); color: var(--bg); padding: 10px 16px; border-radius: 12px; font-size: 14px; max-width: calc(100% - 32px);
+  pointer-events: none; /* не мешает нажимать то, что под ним */
 }
 
 /* ---------- Подсказка об установке ---------- */
