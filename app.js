@@ -808,7 +808,7 @@ function viewProfile() {
       ${S.backupAt ? `Последняя копия: ${shortDate(S.backupAt)}.` : "Копии ещё не было."}</p>
     <div class="btn-row">
       <button class="btn ghost" data-a="exportData">Сохранить копию</button>
-      <label class="btn ghost">Загрузить копию<input type="file" id="importFile" accept="application/json,.json" hidden></label>
+      <label class="btn ghost">Загрузить копию<input type="file" id="importFile" accept="application/json,.json,text/plain,.txt" hidden></label>
     </div>
     <button class="btn ghost" data-a="install">Установить на главный экран</button>
     <button class="btn danger" data-a="askReset">Стереть все данные</button>
@@ -1748,18 +1748,42 @@ const actions = {
     }
   },
   editProfile() { ui.view = "setup"; render(); window.scrollTo(0, 0); },
-  exportData() {
-    S.backupAt = dayKey(); delete S.backupHide;
-    const blob = new Blob([JSON.stringify(S)], { type: "application/json" });
+  // Сначала меню «Поделиться» — чтобы копия ушла с телефона (мессенджер, почта, облако).
+  // Chrome на Android не делится .json, поэтому запасной вариант — тот же текст в .txt.
+  // Нет меню (компьютер, старый браузер) — обычное скачивание
+  async exportData() {
+    const prev = S.backupAt;
+    S.backupAt = dayKey();
+    const json = JSON.stringify(S), name = `hrum-${dayKey()}`;
+    const files = [new File([json], `${name}.json`, { type: "application/json" }), new File([json], `${name}.txt`, { type: "text/plain" })];
+    const file = navigator.canShare && files.find(f => navigator.canShare({ files: [f] }));
+    if (file) {
+      try {
+        await navigator.share({ files: [file], title: "Копия Хрума" });
+      } catch (err) {
+        S.backupAt = prev;
+        if (err.name === "AbortError") return;  // передумал — не отмечаем копию
+        toast("Не получилось поделиться — сохраняю файлом");
+        return actions.downloadCopy(json, name);
+      }
+    } else {
+      return actions.downloadCopy(json, name);
+    }
+    delete S.backupHide;
+    save(); render();
+    toast("Копия отправлена");
+  },
+  downloadCopy(json, name) {
     const a = document.createElement("a");
-    a.href = URL.createObjectURL(blob);
-    a.download = `hrum-${dayKey()}.json`;
+    a.href = URL.createObjectURL(new Blob([json], { type: "application/json" }));
+    a.download = `${name}.json`;
     document.body.appendChild(a);
     a.click();
     a.remove();
     setTimeout(() => URL.revokeObjectURL(a.href), 2000);
+    S.backupAt = dayKey(); delete S.backupHide;
     save(); render();
-    toast("Файл копии сохранён");
+    toast("Файл копии сохранён — отправь его себе в мессенджер или в облако");
   },
   confirmImport() {
     S = Object.assign(blank(), ui.pendingImport);
