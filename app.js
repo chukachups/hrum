@@ -516,6 +516,7 @@ function viewDiary() {
   </header>
   ${installCard()}
   ${isToday ? adjustNote() : ""}
+  ${isToday ? backupNote() : ""}
 
   <section class="card hero" aria-label="Итог дня">
     ${S.skin === "cookie" ? cookieBlock(d) : `
@@ -568,6 +569,20 @@ function adjustNote() {
   return `<div class="card note-card"><b>Хрум может уточнить норму по твоему весу</b>
     <span class="muted small">${r0(targets().kcal)} → ${r0(a.newKcal)} ккал — по 3 неделям записей и взвешиваний</span>
     <div class="btn-row"><button class="btn ghost" data-a="tab" data-v="progress">Посмотреть</button><button class="btn ghost" data-a="hideAdjust">Позже</button></div></div>`;
+}
+
+// Данные живут только в телефоне — раз в 2 недели напоминаем сохранить копию.
+// Первые 2 недели с начала не тревожим: терять ещё почти нечего
+const daysSince = k => Math.round((parseDay(dayKey()) - parseDay(k)) / 864e5);
+function backupNote() {
+  const first = Object.keys(S.weights).sort()[0];
+  if (!first || daysSince(first) < 14) return "";
+  if (S.backupAt && daysSince(S.backupAt) < 14) return "";
+  if (S.backupHide && daysSince(S.backupHide) < 3) return "";
+  const when = S.backupAt ? `Последняя копия — ${daysSince(S.backupAt)} ${plural(daysSince(S.backupAt), ["день", "дня", "дней"])} назад.` : "Копии ещё не было.";
+  return `<div class="card note-card"><b>Сохрани копию данных</b>
+    <span class="muted small">Дневник, вес и рецепты хранятся только в этом телефоне. ${when} Файл пригодится при смене или поломке телефона — убери его в облако, почту или себе в мессенджер.</span>
+    <div class="btn-row"><button class="btn ghost" data-a="exportData">Сохранить копию</button><button class="btn ghost" data-a="hideBackup">Позже</button></div></div>`;
 }
 
 /* Печенька: целая = лимит дня, 12 укусов */
@@ -789,7 +804,8 @@ function viewProfile() {
       <button data-a="setSkin" data-v="cookie" aria-pressed="${S.skin === "cookie"}">Печенька</button>
     </div>
     <div class="section-title"><h2>Данные</h2></div>
-    <p class="note">Всё хранится только на этом телефоне. Раз в пару недель сохраняй копию — пригодится при смене телефона.</p>
+    <p class="note">Всё хранится только на этом телефоне. Раз в пару недель сохраняй копию — пригодится при смене телефона.
+      ${S.backupAt ? `Последняя копия: ${shortDate(S.backupAt)}.` : "Копии ещё не было."}</p>
     <div class="btn-row">
       <button class="btn ghost" data-a="exportData">Сохранить копию</button>
       <label class="btn ghost">Загрузить копию<input type="file" id="importFile" accept="application/json,.json" hidden></label>
@@ -1579,6 +1595,7 @@ const actions = {
     toast(`Поправка сброшена. Норма: ${r0(targets().kcal)} ккал`);
   },
   hideAdjust() { S.adjustHide = dayKey(); save(); render(); },
+  hideBackup() { S.backupHide = dayKey(); save(); render(); },
   pasteLink() { pasteLinkSheet(); },
   openLink() {
     const m = ($("#linkIn").value || "").match(SHARE_HASH);
@@ -1732,6 +1749,7 @@ const actions = {
   },
   editProfile() { ui.view = "setup"; render(); window.scrollTo(0, 0); },
   exportData() {
+    S.backupAt = dayKey(); delete S.backupHide;
     const blob = new Blob([JSON.stringify(S)], { type: "application/json" });
     const a = document.createElement("a");
     a.href = URL.createObjectURL(blob);
@@ -1740,6 +1758,7 @@ const actions = {
     a.click();
     a.remove();
     setTimeout(() => URL.revokeObjectURL(a.href), 2000);
+    save(); render();
     toast("Файл копии сохранён");
   },
   confirmImport() {
