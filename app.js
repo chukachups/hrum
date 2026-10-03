@@ -3,6 +3,7 @@
 /* ================= Константы ================= */
 
 const STORE_KEY = "hrum-v1";
+const PLAN_DAYS = 7; // на сколько дней вперёд можно планировать еду
 const MEALS = [["breakfast", "Завтрак"], ["lunch", "Обед"], ["dinner", "Ужин"], ["snack", "Перекусы"]];
 // Бытовая активность БЕЗ тренировок — тренировки добавляются отдельно
 const ACTIVITY = [
@@ -57,6 +58,7 @@ function dayTitle(k) {
   const t = dayKey();
   if (k === t) return "Сегодня";
   if (k === shiftDay(t, -1)) return "Вчера";
+  if (k === shiftDay(t, 1)) return "Завтра";
   const d = parseDay(k);
   return `${d.getDate()} ${MONTHS[d.getMonth()]}`;
 }
@@ -462,6 +464,7 @@ function viewDiary() {
   const C = 2 * Math.PI * 52;
   const frac = Math.min(1, eaten.kcal / limit);
   const isToday = ui.day === dayKey();
+  const isLast = ui.day >= shiftDay(dayKey(), PLAN_DAYS);
 
   const macro = (name, v, target, color) => {
     const pct = target ? v / target * 100 : 0;
@@ -495,8 +498,8 @@ function viewDiary() {
   <header class="top">
     <div class="day">
       <button class="icon-btn" data-a="prevDay" aria-label="Предыдущий день">‹</button>
-      <div><h1>${dayTitle(ui.day)}</h1><small>${daySub(ui.day)}</small></div>
-      <button class="icon-btn" data-a="nextDay" aria-label="Следующий день" ${isToday ? "disabled" : ""}>›</button>
+      <div data-a="toToday"><h1>${dayTitle(ui.day)}</h1><small>${isToday ? daySub(ui.day) : daySub(ui.day) + " · к сегодня ↩"}</small></div>
+      <button class="icon-btn" data-a="nextDay" aria-label="Следующий день" ${isLast ? "disabled" : ""}>›</button>
     </div>
     <div class="brand"><img src="icons/icon-192.png" alt="">хрум</div>
   </header>
@@ -1228,7 +1231,7 @@ function incomingFoodSheet(data) {
         <span><b>${esc(x.name)}</b><small>${data.meal ? "" : mealName(x.meal) + " · "}${r0(x.kcal)} ккал на 100 г</small></span>
         <input class="input" inputmode="decimal" data-i="${i}"><span>г</span></label>`).join("")}</div>
     ${data.meal ? `<div class="seg" id="fMeal">${MEALS.map(([k, t]) => `<button data-a="pick" data-val="${k}" aria-pressed="${k === data.meal}">${t}</button>`).join("")}</div>` : ""}
-    <div class="seg" id="fDay"><button data-a="pick" data-val="${dayKey()}" aria-pressed="true">Сегодня</button><button data-a="pick" data-val="${shiftDay(dayKey(), -1)}" aria-pressed="false">Вчера</button></div>
+    <div class="seg" id="fDay"><button data-a="pick" data-val="${dayKey()}" aria-pressed="true">Сегодня</button><button data-a="pick" data-val="${shiftDay(dayKey(), -1)}" aria-pressed="false">Вчера</button><button data-a="pick" data-val="${shiftDay(dayKey(), 1)}" aria-pressed="false">Завтра</button></div>
     <div class="card preview" id="fPrev"></div>
     <p class="note" id="fReplace" hidden></p>
     <button class="btn" data-a="importFood">Добавить в дневник</button>
@@ -1448,7 +1451,8 @@ async function onCode(code) {
 const actions = {
   tab(el) { ui.view = el.dataset.v; if (ui.view === "diary") ui.day = ui.day || dayKey(); render(); window.scrollTo(0, 0); },
   prevDay() { ui.day = shiftDay(ui.day, -1); render(); },
-  nextDay() { if (ui.day < dayKey()) { ui.day = shiftDay(ui.day, 1); render(); } },
+  nextDay() { if (ui.day < shiftDay(dayKey(), PLAN_DAYS)) { ui.day = shiftDay(ui.day, 1); render(); } },
+  toToday() { if (ui.day !== dayKey()) { ui.day = dayKey(); render(); } },
   closeSheet() { closeSheet(); },
   pick(el) {
     el.parentElement.querySelectorAll("[data-a=pick]").forEach(b => b.setAttribute("aria-pressed", b === el));
