@@ -158,7 +158,12 @@ const planKgWeek = t => (t.kcal - t.tdee) * 7 / 7700;
 function adjustCalc() {
   const pr = S.profile;
   const end = shiftDay(dayKey(), -1);
-  const days = Array.from({ length: 21 }, (_, i) => shiftDay(end, i - 20));
+  // первые 2 недели от первого взвешивания не берём: уходит вода, вес падает быстрее жира,
+  // и Хрум решил бы, что расход больше, и предложил бы поднять норму
+  const first = Object.keys(S.weights).sort()[0];
+  const skip = first ? shiftDay(first, 14) : end;
+  const water = end < skip;
+  const days = Array.from({ length: 21 }, (_, i) => shiftDay(end, i - 20)).filter(k => k >= skip);
   const formula = targets({ ...pr, adjust: 1 }).tdee;
   const full = days.map(dayData).filter(d => d.es.length && d.eaten.kcal >= d.limit * 0.5);
   const ws = days.filter(k => S.weights[k]).map(k => [(parseDay(k) - parseDay(days[0])) / 864e5, S.weights[k].w]);
@@ -168,7 +173,7 @@ function adjustCalc() {
   if (ws.length < 4 || span < 14) need.push(ws.length < 4
     ? `ещё ${4 - ws.length} ${plural(4 - ws.length, ["взвешивание", "взвешивания", "взвешиваний"])} (раз в 4–5 дней)`
     : "взвешивания на протяжении хотя бы двух недель");
-  if (need.length) return { ready: false, need, days: full.length, weighs: ws.length };
+  if (need.length) return { ready: false, need, water, skip, days: full.length, weighs: ws.length };
   const mx = ws.reduce((a, [x]) => a + x, 0) / ws.length, my = ws.reduce((a, [, y]) => a + y, 0) / ws.length;
   const slope = ws.reduce((a, [x, y]) => a + (x - mx) * (y - my), 0) / ws.reduce((a, [x]) => a + (x - mx) ** 2, 0);
   const intake = full.reduce((a, d) => a + d.eaten.kcal, 0) / full.length;
@@ -182,6 +187,11 @@ function adjustCalc() {
 }
 function adjustCard(a) {
   const t = targets();
+  if (!a.ready && a.water) {
+    return `<p class="small"><b>Хрум уточнит норму по твоему весу — но позже.</b> В первые две недели вес падает быстро:
+      уходит лишняя вода, а не только жир. Это нормально, на норму это не влияет.</p>
+      <p class="muted small">Считать Хрум начнёт с ${shortDate(a.skip)}, первая проверка — ещё через пару недель. А пока записывай еду и взвешивайся раз в 4–5 дней.</p>`;
+  }
   if (!a.ready) {
     return `<p class="small"><b>Хрум уточнит норму по твоему весу.</b> Формула — хорошая оценка, но % жира с весов бывает неточным,
       и не всё съеденное попадает в дневник. Для проверки нужно: ${a.need.join(" и ")}.</p>
