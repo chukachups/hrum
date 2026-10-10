@@ -45,7 +45,10 @@ const BASKET_LEVELS = [[0.8, 2], [0.5, 2], [0.25, 2], [0, 2], [0, 1]];
 const rub = n => r0(n).toLocaleString("ru-RU") + " ₽";
 
 const hasBasketData = () => typeof BASKET_DATA !== "undefined";
-const roleItems = role => (hasBasketData() && BASKET_DATA.items[role]) || [];
+// выбранный магазин (если его цен нет — первый, что есть); старые корзины без store — Перекрёсток
+const basketStore = () => (BASKET_DATA.stores[S.basketOpts?.store] ? S.basketOpts.store : Object.keys(BASKET_DATA.stores)[0]);
+const storeInfo = key => BASKET_DATA.stores[key] || BASKET_DATA.stores.perekrestok || Object.values(BASKET_DATA.stores)[0];
+const roleItems = role => (hasBasketData() && BASKET_DATA.stores[basketStore()].items[role]) || [];
 // [название, обычная цена, цена сейчас, г в упаковке (весовое — 1000), шаг весового г или 0, ккал, Б, Ж, У]
 const itemNut = it => ({ kcal: it[5], p: it[6], f: it[7], c: it[8] });
 // Табличное КБЖУ роли — среднее по товарам (для расчёта порций до выбора товара)
@@ -148,7 +151,7 @@ function planWeek(budget, seed, no) {
         for (const [r, g] of meals[m].ing) { const n = itemNut(items[r].it); for (const key of KEYS) eat[i][key] += n[key] * g * k / 100; }
       });
     }
-    res = { budget, seed, cost, start, level, cheap, people: people.map((p, i) => ({ ...p, eat: eat[i] })),
+    res = { budget, seed, cost, start, level, cheap, store: basketStore(), people: people.map((p, i) => ({ ...p, eat: eat[i] })),
       days: days.map(d => ({ day: d.day, meals: Object.fromEntries(BASKET_MEALS.map(([m]) => [m, d.meals[m].id])) })),
       portions, items: Object.fromEntries(Object.entries(items).map(([r, x]) => [r, { name: x.it[0], price: x.it[1], pack: x.it[3], kg: !!x.it[4],
         packs: x.packs, cost: x.cost, grams: x.grams, need: x.need, nut: itemNut(x.it) }])) };
@@ -174,12 +177,13 @@ function viewBasket() {
           <button data-a="bkTwo" data-v="1" aria-pressed="${!!o.two}">${S.partner ? `Я и ${esc(S.partner.name)}` : "Нас двое"}</button></div></div>
       ${o.two && !S.partner ? `<p class="note">Укажи второго человека и его норму в Профиле — тогда Хрум посчитает порции на двоих.</p>` : ""}
       <div class="field"><span>Магазин</span>
-        <div class="chips"><button class="chip" aria-pressed="true">Перекрёсток</button>
-          <button class="chip" disabled>Пятёрочка · скоро</button><button class="chip" disabled>Глобус · скоро</button></div></div>
+        <div class="chips">${Object.entries(BASKET_DATA.stores).map(([k, st]) =>
+          `<button class="chip" data-a="bkStore" data-v="${k}" aria-pressed="${basketStore() === k}">${esc(st.name)}</button>`).join("")}
+          <button class="chip" disabled>Пятёрочка · скоро</button></div></div>
       <button class="btn" data-a="bkBuild">${b ? "Собрать заново" : "Собрать корзину"}</button>
     </section>`;
   return `<header class="top"><h1>Корзина</h1><span class="muted small">меню на неделю под норму</span></header>
-    ${form}${b ? basketResult(b) : `<p class="muted small">Хрум подберёт блюда на 7 дней под ${o.two && S.partner ? "ваши нормы" : "твою норму"} и составит список покупок по ценам Перекрёстка.</p>`}`;
+    ${form}${b ? basketResult(b) : `<p class="muted small">Хрум подберёт блюда на 7 дней под ${o.two && S.partner ? "ваши нормы" : "твою норму"} и составит список покупок по ценам выбранного магазина.</p>`}`;
 }
 
 function basketResult(b) {
@@ -229,8 +233,21 @@ function basketResult(b) {
     ${menu}
     <div class="section-title"><h2>Список покупок</h2><span>${Object.keys(b.items).length} позиций</span></div>
     <section class="card bk-list">${byDept}</section>
-    <p class="muted small">Цены ${esc(BASKET_DATA.store)} на ${shortDate(BASKET_DATA.date)}, обычные — без скидок и карты. В магазине могут немного отличаться.
+    <button class="row-card dashed" data-a="bkShare">${icon("share", 18)} Отправить список</button>
+    <p class="muted small">Цены: ${esc(storeInfo(b.store).name)}, ${shortDate(storeInfo(b.store).date)}, обычные — без скидок и карты. В магазине могут немного отличаться.
       Масло, крупы и специи обычно остаются на следующую неделю.</p>`;
+}
+
+// Список покупок текстом — в мессенджер (например, тому, кто идёт в магазин)
+function basketText(b) {
+  const lines = [`Список покупок · ${storeInfo(b.store).name} · ≈ ${rub(b.cost)}`];
+  for (const [dep, title] of BASKET_DEPTS) {
+    const rows = Object.entries(b.items).filter(([r]) => BASKET_DATA.roles[r]?.[1] === dep);
+    if (!rows.length) continue;
+    lines.push("", title + ":");
+    for (const [, x] of rows) lines.push(`— ${x.name}, ${x.kg ? fmt(x.grams / 1000, 1) + " кг" : x.packs + " уп."}`);
+  }
+  return lines.join("\n");
 }
 
 function basketDishSheet(day, meal) {
@@ -276,8 +293,22 @@ function buildBasket(seed) {
 Object.assign(actions, {
   bkBudget(el) { S.basketOpts.budget = +el.dataset.v; save(); render(); },
   bkTwo(el) { S.basketOpts.two = el.dataset.v === "1"; save(); render(); },
+  bkStore(el) { S.basketOpts.store = el.dataset.v; save(); render(); },
   bkBuild() { buildBasket(S.basket?.seed || 1); },
   bkReroll() { buildBasket((S.basket?.seed || 1) + 1); },
+  async bkShare() {
+    const text = basketText(S.basket);
+    if (navigator.share) {
+      try { await navigator.share({ title: "Список покупок", text }); return; }
+      catch (e) { if (e.name === "AbortError") return; }
+    }
+    try { await navigator.clipboard.writeText(text); toast("Список скопирован — вставь его в мессенджер"); }
+    catch (e) {
+      openSheet(`<h2>Список покупок</h2><p class="muted small">Выдели и скопируй:</p>
+        <textarea class="input" rows="10" readonly>${esc(text)}</textarea>
+        <button class="btn ghost" data-a="closeSheet">Готово</button>`);
+    }
+  },
   bkClear() { S.basket = null; S.basketChecked = {}; save(); render(); },
   bkDish(el) { basketDishSheet(el.dataset.day, el.dataset.meal); },
   bkNo(el) {
