@@ -161,6 +161,71 @@ function planWeek(budget, seed, no) {
   return res;
 }
 
+/* ---------- План в дневнике ---------- */
+// В пустом приёме дневника — блюдо из корзины на этот день: записать свою порцию одним нажатием
+function planHint(day, meal) {
+  const b = S.basket, d = b && b.days.find(x => x.day === day);
+  const dish = d && DISHES.find(x => x.id === d.meals[meal]);
+  if (!dish || !b.portions[day + "|" + meal]) return "";
+  return `<button class="garnish-hint" data-a="bkToDiary" data-day="${day}" data-meal="${meal}">По плану: ${esc(dish.name)} — записать мою порцию</button>`;
+}
+
+/* ---------- Меню на двоих: отправить второму человеку ---------- */
+// Ссылка #plan= несёт меню, порции обоих и товары. У получателя люди меняются местами: он — «Ты»
+function planLink() {
+  const b = S.basket, r2 = x => Math.round(x * 100) / 100;
+  return location.origin + location.pathname + "#plan=" + packLink({
+    s: b.store, b: b.budget, c: r0(b.cost), o: b.over ? 1 : 0, kc: b.people.map(x => r0(x.kcal)),
+    d: b.days.map(d => [d.day, ...BASKET_MEALS.map(([m]) => d.meals[m])]),
+    k: b.days.map(d => BASKET_MEALS.map(([m]) => (b.portions[d.day + "|" + m] || []).map(r2))),
+    i: Object.fromEntries(Object.entries(b.items).map(([r, x]) => [r, [x.name, x.price, x.pack, x.kg ? 1 : 0, x.packs, r0(x.cost),
+      r0(x.grams), r0(x.need), ...KEYS.map(key => r2(x.nut[key]))]])),
+  });
+}
+function parsePlanHash() {
+  const m = location.hash.match(/^#plan=([\w-]+)$/);
+  if (!m) return null;
+  try {
+    const d = unpackLink(m[1]);
+    const meals = BASKET_MEALS.map(x => x[0]);
+    if (!Array.isArray(d.d) || d.d.length !== 7 || d.kc.length !== 2) return null;
+    const days = d.d.map(([day, ...ids]) => ({ day, meals: Object.fromEntries(meals.map((mm, j) => [mm, ids[j]])) }));
+    if (days.some(x => !/^\d{4}-\d\d-\d\d$/.test(x.day) || meals.some(mm => !DISHES.find(z => z.id === x.meals[mm])))) return null;
+    const portions = {};
+    days.forEach((x, i) => meals.forEach((mm, j) => { portions[x.day + "|" + mm] = d.k[i][j].slice().reverse(); }));
+    const items = Object.fromEntries(Object.entries(d.i).map(([r, v]) => [r, { name: String(v[0]).slice(0, 160), price: +v[1], pack: +v[2], kg: !!v[3],
+      packs: +v[4], cost: +v[5], grams: +v[6], need: +v[7], nut: { kcal: +v[8], p: +v[9], f: +v[10], c: +v[11] } }]));
+    return { store: d.s, budget: +d.b, cost: +d.c, over: !!d.o, kcalFor: d.kc[1], kcalFrom: d.kc[0], days, portions, items };
+  } catch (e) {
+    return null;
+  }
+}
+// Съедено за неделю по порциям — для получателя пересчитываем сами
+function planEat(days, portions, items, n) {
+  const eat = Array.from({ length: n }, () => ({ kcal: 0, p: 0, f: 0, c: 0 }));
+  for (const { day, meals } of days) for (const [m] of BASKET_MEALS) {
+    const dish = DISHES.find(x => x.id === meals[m]);
+    (portions[day + "|" + m] || []).forEach((k, i) => {
+      for (const [r, g] of dish.ing) for (const key of KEYS) eat[i][key] += (items[r]?.nut[key] || 0) * g * k / 100;
+    });
+  }
+  return eat;
+}
+function incomingPlanSheet(pl) {
+  ui.incomingPlan = pl;
+  const mine = r0(targets().kcal), diff = Math.abs(mine - pl.kcalFor) / mine > 0.05;
+  const span = `${shortDate(pl.days[0].day)} – ${shortDate(pl.days[6].day)}`;
+  openSheet(`<h2>Тебе прислали меню на неделю</h2>
+    <p>${span} · ${esc(storeInfo(pl.store).name)} · ≈ ${rub(pl.cost)} на двоих.</p>
+    <p class="muted small">Твои порции посчитаны под ${pl.kcalFor} ккал в день. В дневнике у каждого приёма появится «По плану…» —
+      записывать еду можно одним нажатием. Список покупок тоже будет у тебя.</p>
+    ${diff ? `<p class="note">Твоя норма сейчас ${mine} ккал — порции немного разойдутся. Отправь свою норму (Профиль → «Отправить мою норму»),
+      и пусть меню пришлют заново.</p>` : ""}
+    ${S.basket ? `<p class="muted small">Твоя текущая корзина заменится этой.</p>` : ""}
+    <button class="btn" data-a="bkTakePlan">Взять это меню</button>
+    <button class="btn ghost" data-a="closeSheet">Не сейчас</button>`);
+}
+
 /* ---------- Напоминание обновить цены ---------- */
 // Цены — снимок с сайтов на день сбора; обновляются на компьютере (scrape/), сам Хрум этого не умеет.
 // Через месяц напоминаем: в «Корзине» всегда, в дневнике — если «Корзиной» пользовались (скрыть на неделю)
@@ -197,7 +262,8 @@ function viewBasket() {
       <div class="field"><span>На кого</span>
         <div class="seg"><button data-a="bkTwo" data-v="0" aria-pressed="${!o.two}">Только я</button>
           <button data-a="bkTwo" data-v="1" aria-pressed="${!!o.two}">${S.partner ? `Я и ${esc(S.partner.name)}` : "Нас двое"}</button></div></div>
-      ${o.two && !S.partner ? `<p class="note">Укажи второго человека и его норму в Профиле — тогда Хрум посчитает порции на двоих.</p>` : ""}
+      ${o.two && !S.partner ? `<p class="note">Чтобы посчитать порции на двоих, Хруму нужна норма второго человека.</p>
+        <button class="btn ghost" data-a="editPartner">Указать второго человека</button>` : ""}
       <div class="field"><span>Магазин</span>
         <div class="chips">${Object.entries(BASKET_DATA.stores).map(([k, st]) =>
           `<button class="chip" data-a="bkStore" data-v="${k}" aria-pressed="${basketStore() === k}">${esc(st.name)}</button>`).join("")}
@@ -230,12 +296,17 @@ function basketResult(b) {
       <div class="btn-row"><button class="btn ghost" data-a="bkReroll">Другие блюда</button><button class="btn ghost" data-a="bkClear">Очистить</button></div>
     </section>`;
 
-  const menu = b.days.map((d, i) => `<article class="meal">
-      <div class="meal-head"><h3>${i === 0 ? "Сегодня" : daySub(d.day).replace(/^./, c => c.toUpperCase())}</h3></div>
+  const today = dayKey(), past = b.days.filter(d => d.day < today);
+  const shown = ui.bkPast ? b.days : b.days.filter(d => d.day >= today);
+  const dayHead = d => d.day === today ? `Сегодня, ${daySub(d.day)}` : d.day === shiftDay(today, 1) ? `Завтра, ${daySub(d.day)}`
+    : daySub(d.day).replace(/^./, c => c.toUpperCase());
+  const menu = (past.length && shown.length ? `<button class="row-card dashed" data-a="bkPast">${ui.bkPast ? "Скрыть прошедшие дни"
+      : `Прошедшие дни: ${past.length} — показать`}</button>` : "") + shown.map(d => `<article class="meal ${d.day === today ? "bk-today" : ""}">
+      <div class="meal-head"><h3>${dayHead(d)}</h3></div>
       ${BASKET_MEALS.map(([m, t]) => {
         const x = dish(d.meals[m]);
         if (!x) return "";
-        const left = m === "lunch" && i > 0;
+        const left = m === "lunch" && d.day !== b.days[0].day;
         return `<button class="item" data-a="bkDish" data-day="${d.day}" data-meal="${m}">
           <span class="n">${esc(x.name)}${left ? `<span class="tag">со вчера</span>` : ""}</span><span class="k">${t}</span></button>`;
       }).join("")}</article>`).join("");
@@ -251,15 +322,26 @@ function basketResult(b) {
         <span class="k">${rub(x.cost)}</span></label>`).join("");
   }).join("");
 
-  return `${summary}
-    <div class="section-title"><h2>Меню</h2><span>нажми блюдо — граммы и рецепт</span></div>
-    ${menu}
+  const last = b.days[b.days.length - 1].day;
+  const span = `${shortDate(b.days[0].day)} – ${shortDate(last)}`;
+  const status = today > last
+    ? `<div class="card note-card"><b>Неделя этой корзины закончилась (${span})</b>
+        <span class="muted small">Собери новую — Хрум подберёт другие блюда на следующие 7 дней.</span>
+        <button class="btn" data-a="bkBuild">Собрать на новую неделю</button></div>`
+    : "";
+  const dayNo = b.days.findIndex(d => d.day === today) + 1;
+  return `${status}${summary}
+    <div class="section-title"><h2>Меню</h2><span>${dayNo ? `день ${dayNo} из 7 · ` : ""}нажми блюдо — граммы и рецепт</span></div>
+    ${menu || `<p class="muted small">Все дни этой корзины прошли.</p>`}
     <div class="section-title"><h2>Список покупок</h2><span>${Object.keys(b.items).length} позиций</span></div>
     <section class="card bk-list">${byDept}</section>
-    <button class="row-card dashed" data-a="bkShare">${icon("share", 18)} Отправить список</button>
+    <button class="row-card dashed" data-a="bkShare">${icon("share", 18)} Отправить список покупок</button>
+    ${b.people.length > 1 ? `<button class="row-card dashed" data-a="bkSendPlan">${icon("share", 18)} Отправить меню с порциями на телефон: ${esc(b.people[1].name)}</button>` : ""}
     <p class="muted small">Цены: ${esc(storeInfo(b.store).name)}, ${shortDate(storeInfo(b.store).date)}, обычные — без скидок и карты. В магазине могут немного отличаться.
       Масло, крупы и специи обычно остаются на следующую неделю.</p>`;
 }
+
+const fmtG = g => g >= 1000 ? fmt(g / 1000, 2) + " кг" : r0(g / 10) * 10 + " г";
 
 // Список покупок текстом — в мессенджер (например, тому, кто идёт в магазин)
 function basketText(b) {
@@ -280,11 +362,20 @@ function basketDishSheet(day, meal) {
   const head = b.people.map(p => `<th>${esc(p.name)}</th>`).join("");
   const rows = dish.ing.map(([r, g]) => `<tr><td>${esc(BASKET_DATA.roles[r][0])}</td>${ks.map(k => `<td>${r0(g * k / 5) * 5} г</td>`).join("")}</tr>`).join("");
   const kc = ks.map(k => dish.ing.reduce((s, [r, g]) => s + b.items[r].nut.kcal * g * k / 100, 0));
+  // ужин готовится сразу и на обед завтра — сколько продуктов взять на всю кастрюлю
+  const next = meal === "dinner" && b.days.find(x => x.day === shiftDay(day, 1));
+  const ks2 = next && next.meals.lunch === dish.id ? b.portions[next.day + "|lunch"] : null;
+  const total = ks2 ? [...ks, ...ks2].reduce((a, k) => a + k, 0) : 0;
+  const cookRows = ks2 ? dish.ing.map(([r, g]) => `<tr><td>${esc(BASKET_DATA.roles[r][0])}</td><td>${fmtG(g * total)}</td></tr>`).join("") : "";
+  const leftover = meal === "lunch" && day !== b.days[0].day;
   openSheet(`<h2>${esc(dish.name)}</h2>
     <p class="muted small">${daySub(day)} · ${BASKET_MEALS.find(x => x[0] === meal)[1].toLowerCase()} · вес продуктов сырыми</p>
     <table class="bk-table"><tr><th></th>${head}</tr>${rows}
       <tr class="sum"><td>Ккал</td>${kc.map(x => `<td>${r0(x)}</td>`).join("")}</tr></table>
     ${dish.how ? `<p class="small">${esc(dish.how)}</p>` : ""}
+    ${leftover ? `<p class="note">Это вчерашний ужин — готовить не нужно, просто разогрей свою порцию.</p>` : ""}
+    ${ks2 ? `<h3 class="bk-dept">Готовить сразу на два раза — ужин и обед завтра${b.people.length > 1 ? ", на двоих" : ""}</h3>
+      <table class="bk-table">${cookRows}</table>` : ""}
     ${day >= dayKey() && day <= shiftDay(dayKey(), PLAN_DAYS) ? `<button class="btn" data-a="bkToDiary" data-day="${day}" data-meal="${meal}">Записать мою порцию в дневник</button>` : ""}
     <button class="btn ghost" data-a="bkNo" data-id="${dish.id}">Не предлагать это блюдо</button>`);
 }
@@ -303,6 +394,18 @@ function mountBasket() {
   }));
 }
 
+const boughtCount = () => Object.values(S.basketChecked || {}).filter(Boolean).length;
+// Новое меню = новый список покупок: если в магазине уже что-то отмечено — спросить
+function confirmRebuild(fn) {
+  const n = boughtCount();
+  if (!S.basket || !n) return fn();
+  ui.bkPending = fn;
+  openSheet(`<h2>Собрать новое меню?</h2>
+    <p>В списке уже отмечено ${n} ${plural(n, ["покупка", "покупки", "покупок"])}. Новое меню — это новый список, отметки сбросятся.</p>
+    <button class="btn" data-a="bkRebuildYes">Да, собрать новое</button>
+    <button class="btn ghost" data-a="closeSheet">Оставить как есть</button>`);
+}
+
 function buildBasket(seed) {
   const sum = num($("#bkSum")?.value);
   if (sum && sum >= 500 && sum <= 200000) S.basketOpts.budget = r0(sum);
@@ -318,8 +421,38 @@ Object.assign(actions, {
   bkTwo(el) { S.basketOpts.two = el.dataset.v === "1"; save(); render(); },
   hidePrices() { S.pricesHide = dayKey(); save(); render(); },
   bkStore(el) { S.basketOpts.store = el.dataset.v; save(); render(); },
-  bkBuild() { buildBasket(S.basket?.seed || 1); },
-  bkReroll() { buildBasket((S.basket?.seed || 1) + 1); },
+  bkBuild() { confirmRebuild(() => buildBasket(S.basket?.seed || 1)); },
+  bkReroll() { confirmRebuild(() => buildBasket((S.basket?.seed || 1) + 1)); },
+  async bkSendPlan() {
+    const b = S.basket, url = planLink();
+    const text = `Меню на неделю из Хрума (${shortDate(b.days[0].day)} – ${shortDate(b.days[6].day)}) — твои порции уже посчитаны. Открой ссылку:`;
+    if (navigator.share) {
+      try { await navigator.share({ title: "Меню на неделю", text, url }); return; }
+      catch (e) { if (e.name === "AbortError") return; }
+    }
+    try { await navigator.clipboard.writeText(`${text} ${url}`); toast("Ссылка скопирована — отправь её в мессенджер"); }
+    catch (e) {
+      openSheet(`<h2>Ссылка на меню</h2><p class="muted small">Скопируй и отправь:</p>
+        <textarea class="input" rows="4" readonly>${esc(url)}</textarea>
+        <button class="btn ghost" data-a="closeSheet">Готово</button>`);
+    }
+  },
+  bkTakePlan() {
+    const pl = ui.incomingPlan, me = targets();
+    const other = S.partner?.name || "Второй человек", k = pl.kcalFrom / me.kcal;
+    const people = [{ name: "Ты", kcal: pl.kcalFor, p: me.p * pl.kcalFor / me.kcal, f: me.f * pl.kcalFor / me.kcal, c: me.c * pl.kcalFor / me.kcal, me: true },
+      { name: other, kcal: pl.kcalFrom, p: me.p * k, f: me.f * k, c: me.c * k }];
+    const eat = planEat(pl.days, pl.portions, pl.items, 2);
+    S.basket = { budget: pl.budget, seed: 1, cost: pl.cost, start: pl.days[0].day, store: pl.store, over: pl.over, shared: true,
+      people: people.map((x, i) => ({ ...x, eat: eat[i] })), days: pl.days, portions: pl.portions, items: pl.items };
+    S.basketChecked = {};
+    (S.basketOpts ||= { budget: pl.budget, two: true }).two = true;
+    ui.incomingPlan = null; ui.view = "basket";
+    save(); closeSheet(); render(); window.scrollTo(0, 0);
+    toast("Меню на неделю — у тебя");
+  },
+  bkPast() { ui.bkPast = !ui.bkPast; render(); },
+  bkRebuildYes() { const fn = ui.bkPending; ui.bkPending = null; closeSheet(); fn?.(); },
   async bkShare() {
     const text = basketText(S.basket);
     if (navigator.share) {
@@ -333,12 +466,14 @@ Object.assign(actions, {
         <button class="btn ghost" data-a="closeSheet">Готово</button>`);
     }
   },
-  bkClear() { S.basket = null; S.basketChecked = {}; save(); render(); },
+  bkClear() { confirmRebuild(() => { S.basket = null; S.basketChecked = {}; save(); render(); }); },
   bkDish(el) { basketDishSheet(el.dataset.day, el.dataset.meal); },
   bkNo(el) {
     S.basketNo = [...new Set([...(S.basketNo || []), el.dataset.id])];
     const name = DISHES.find(d => d.id === el.dataset.id).name;
     save(); closeSheet();
+    // продукты уже куплены — меню этой недели не трогаем, блюдо уйдёт со следующей корзины
+    if (boughtCount()) { render(); toast(`«${name}» больше не предложу — со следующей корзины`); return; }
     buildBasket(S.basket?.seed || 1);
     toast(`«${name}» больше не предлагаю`);
   },
@@ -346,13 +481,16 @@ Object.assign(actions, {
     const b = S.basket, { day, meal } = el.dataset;
     const dish = DISHES.find(x => x.id === b.days.find(x => x.day === day).meals[meal]);
     const k = b.portions[day + "|" + meal][0];
-    const diaryMeal = meal === "snack" ? "snack" : meal;
+    // одной строкой — названием блюда, а не семью товарами с длинными названиями; вес — сумма сырых продуктов
+    const e = { id: uid(), pid: null, plan: true, name: dish.name, meal, grams: 0, kcal: 0, p: 0, f: 0, c: 0 };
     for (const [r, g] of dish.ing) {
-      const x = b.items[r], grams = r0(g * k / 5) * 5, q = grams / 100;
-      (S.entries[day] ||= []).push({ id: uid(), pid: null, name: x.name, meal: diaryMeal, grams,
-        kcal: x.nut.kcal * q, p: x.nut.p * q, f: x.nut.f * q, c: x.nut.c * q });
+      const x = b.items[r], grams = g * k;
+      e.grams += grams;
+      for (const key of KEYS) e[key] += x.nut[key] * grams / 100;
     }
-    save(); closeSheet();
+    e.grams = r0(e.grams / 5) * 5;
+    (S.entries[day] ||= []).push(e);
+    save(); closeSheet(); render();
     toast(`${dish.name} — в дневник на ${dayTitle(day).toLowerCase()}`);
   },
 });

@@ -496,7 +496,8 @@ function viewDiary() {
           <span class="g">${pieces(e)}${fmt(e.grams, 0)} г</span><span class="m">Б ${r0(e.p)} · Ж ${r0(e.f)} · У ${r0(e.c)}</span></button>`).join("")
       : `<div class="empty">Пусто</div>`;
     const hint = items.length && needsGarnish(d, key)
-      ? `<button class="garnish-hint" data-a="garnish" data-meal="${key}">${key === "breakfast" ? "Мало углеводов? Подобрать к завтраку" : "Нет гарнира? Подобрать под норму дня"}</button>` : "";
+      ? `<button class="garnish-hint" data-a="garnish" data-meal="${key}">${key === "breakfast" ? "Мало углеводов? Подобрать к завтраку" : "Нет гарнира? Подобрать под норму дня"}</button>`
+      : !items.length && typeof planHint === "function" ? planHint(ui.day, key) : ""; // блюдо из Корзины на этот приём
     return `<article class="meal">
       <div class="meal-head"><h3>${title}</h3><span class="kc">${kc ? r0(kc) + " ккал" : ""}</span>
         ${items.length ? `<button class="add share" data-a="shareMeal" data-meal="${key}" aria-label="Поделиться: ${title}">${icon("share", 16)}</button>` : ""}
@@ -844,17 +845,17 @@ function mountProfile() {
 
 /* ================= Экран: заполнение профиля ================= */
 
-const SHARE_HASH = /#(recipe|norm|food)=[\w-]+/;
+const SHARE_HASH = /#(recipe|norm|food|plan)=[\w-]+/;
 // Ссылка открылась там, где Хрум ещё не заполнен (на iPhone — Safari, а Хрум живёт на иконке)
 function linkCard() {
   const m = location.hash.match(SHARE_HASH);
   if (S.profile || !m) return "";
-  const what = { recipe: "рецепт", norm: "норму", food: "еду" }[m[1]];
+  const what = { recipe: "рецепт", norm: "норму", food: "еду", plan: "меню на неделю" }[m[1]];
   return `<div class="card link-card"><h2>Тебе прислали ${what}</h2>
     <p class="muted small">Если Хрум уже стоит у тебя на главном экране, ссылка открылась не там: у иконки своя память.
     Скопируй ссылку, открой Хрум с иконки и нажми в Профиле «Вставить ссылку».</p>
     <button class="btn" data-a="copyLink">Скопировать ссылку</button>
-    <p class="muted small">Хрума на главном экране ещё нет? Заполни профиль ниже — и ${what === "норму" ? "норма" : what === "рецепт" ? "рецепт" : "еда"} откроется сразу после этого.</p></div>`;
+    <p class="muted small">Хрума на главном экране ещё нет? Заполни профиль ниже — и ${what === "норму" ? "норма" : what === "рецепт" ? "рецепт" : what === "еду" ? "еда" : "меню"} откроется сразу после этого.</p></div>`;
 }
 function pasteLinkSheet() {
   openSheet(`<h2>Вставить ссылку</h2>
@@ -1894,6 +1895,12 @@ function render() {
     history.replaceState(null, "", location.pathname);
     if (data) incomingFoodSheet(data); else toast("Ссылка на еду повреждена");
   }
+  // ссылка «Отправить меню с порциями» из Корзины (basket.js)
+  if (S.profile && location.hash.startsWith("#plan=") && $("#sheet").hidden && typeof parsePlanHash === "function") {
+    const data = parsePlanHash();
+    history.replaceState(null, "", location.pathname);
+    if (data) incomingPlanSheet(data); else toast("Ссылка на меню повреждена");
+  }
   // ссылка «Поделиться рецептом»
   if (S.profile && location.hash.startsWith("#recipe=") && $("#sheet").hidden) {
     const data = parseRecipeHash();
@@ -1909,7 +1916,7 @@ window.addEventListener("beforeinstallprompt", e => {
 });
 // ссылка с рецептом или нормой открыта, когда Хрум уже был открыт
 window.addEventListener("hashchange", () => {
-  if (/^#(recipe|norm|food)=/.test(location.hash)) { closeSheet(); render(); }
+  if (/^#(recipe|norm|food|plan)=/.test(location.hash)) { closeSheet(); render(); }
 });
 window.addEventListener("appinstalled", () => { ui.installPrompt = null; toast("Хрум установлен!"); });
 // Смена даты, пока приложение открыто в фоне
