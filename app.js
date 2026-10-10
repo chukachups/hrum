@@ -520,6 +520,7 @@ function viewDiary() {
   ${installCard()}
   ${isToday ? adjustNote() : ""}
   ${isToday ? backupNote() : ""}
+  ${isToday && typeof pricesNote === "function" ? pricesNote() : ""}
 
   <section class="card hero" aria-label="Итог дня">
     ${S.skin === "cookie" ? cookieBlock(d) : `

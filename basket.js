@@ -161,6 +161,28 @@ function planWeek(budget, seed, no) {
   return res;
 }
 
+/* ---------- Напоминание обновить цены ---------- */
+// Цены — снимок с сайтов на день сбора; обновляются на компьютере (scrape/), сам Хрум этого не умеет.
+// Через месяц напоминаем: в «Корзине» всегда, в дневнике — если «Корзиной» пользовались (скрыть на неделю)
+const PRICE_MAX_DAYS = 30;
+function stalePrices() {
+  if (!hasBasketData()) return [];
+  return Object.values(BASKET_DATA.stores).filter(st => st.date && daysSince(st.date) >= PRICE_MAX_DAYS);
+}
+function staleText(list) {
+  const what = list.map(st => `${st.name} — от ${shortDate(st.date)}, ${daysSince(st.date)} ${plural(daysSince(st.date), ["день", "дня", "дней"])}`).join("; ");
+  return `Цены в «Корзине» устарели: ${what}. В магазине всё может стоить иначе — корзина выйдет дороже или дешевле расчёта.
+    Попроси обновить цены на компьютере (Claude: «обнови цены в Хруме»), потом обнови Хрум.`;
+}
+function pricesNote() {
+  const list = stalePrices();
+  if (!list.length || !S.basket) return "";
+  if (S.pricesHide && daysSince(S.pricesHide) < 7) return "";
+  return `<div class="card note-card"><b>Пора обновить цены</b>
+    <span class="muted small">${staleText(list)}</span>
+    <div class="btn-row"><button class="btn ghost" data-a="tab" data-v="basket">В Корзину</button><button class="btn ghost" data-a="hidePrices">Позже</button></div></div>`;
+}
+
 /* ---------- Экран ---------- */
 
 function viewBasket() {
@@ -183,6 +205,7 @@ function viewBasket() {
       <button class="btn" data-a="bkBuild">${b ? "Собрать заново" : "Собрать корзину"}</button>
     </section>`;
   return `<header class="top"><h1>Корзина</h1><span class="muted small">меню на неделю под норму</span></header>
+    ${stalePrices().length ? `<div class="card note-card"><b>Пора обновить цены</b><span class="muted small">${staleText(stalePrices())}</span></div>` : ""}
     ${form}${b ? basketResult(b) : `<p class="muted small">Хрум подберёт блюда на 7 дней под ${o.two && S.partner ? "ваши нормы" : "твою норму"} и составит список покупок по ценам выбранного магазина.</p>`}`;
 }
 
@@ -293,6 +316,7 @@ function buildBasket(seed) {
 Object.assign(actions, {
   bkBudget(el) { S.basketOpts.budget = +el.dataset.v; save(); render(); },
   bkTwo(el) { S.basketOpts.two = el.dataset.v === "1"; save(); render(); },
+  hidePrices() { S.pricesHide = dayKey(); save(); render(); },
   bkStore(el) { S.basketOpts.store = el.dataset.v; save(); render(); },
   bkBuild() { buildBasket(S.basket?.seed || 1); },
   bkReroll() { buildBasket((S.basket?.seed || 1) + 1); },
@@ -333,3 +357,5 @@ Object.assign(actions, {
   },
 });
 VIEWS.basket = [viewBasket, mountBasket];
+// app.js нарисовал первый экран раньше, чем загрузился этот файл, — перерисуем, чтобы показать напоминание о ценах
+if (ui.view === "diary" && $("#sheet").hidden && S.profile) render();
