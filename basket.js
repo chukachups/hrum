@@ -46,7 +46,9 @@ const rub = n => r0(n).toLocaleString("ru-RU") + " ₽";
 
 const hasBasketData = () => typeof BASKET_DATA !== "undefined";
 // выбранный магазин (если его цен нет — первый, что есть); старые корзины без store — Перекрёсток
-const basketStore = () => (BASKET_DATA.stores[S.basketOpts?.store] ? S.basketOpts.store : Object.keys(BASKET_DATA.stores)[0]);
+let storeOverride = null;
+const basketStore = () => (BASKET_DATA.stores[storeOverride] ? storeOverride
+  : BASKET_DATA.stores[S.basketOpts?.store] ? S.basketOpts.store : Object.keys(BASKET_DATA.stores)[0]);
 const storeInfo = key => BASKET_DATA.stores[key] || BASKET_DATA.stores.perekrestok || Object.values(BASKET_DATA.stores)[0];
 const roleItems = role => (hasBasketData() && BASKET_DATA.stores[basketStore()].items[role]) || [];
 // [название, обычная цена, цена сейчас, г в упаковке (весовое — 1000), шаг весового г или 0, ккал, Б, Ж, У]
@@ -153,7 +155,7 @@ function planWeek(budget, seed, no) {
     }
     res = { budget, seed, cost, start, level, cheap, store: basketStore(), people: people.map((p, i) => ({ ...p, eat: eat[i] })),
       days: days.map(d => ({ day: d.day, meals: Object.fromEntries(BASKET_MEALS.map(([m]) => [m, d.meals[m].id])) })),
-      portions, items: Object.fromEntries(Object.entries(items).map(([r, x]) => [r, { name: x.it[0], price: x.it[1], pack: x.it[3], kg: !!x.it[4],
+      portions, items: Object.fromEntries(Object.entries(items).map(([r, x]) => [r, { name: x.it[0], price: x.it[1], pack: x.it[3], kg: !!x.it[4], step: x.it[4],
         packs: x.packs, cost: x.cost, grams: x.grams, need: x.need, nut: itemNut(x.it) }])) };
     if (cost <= budget) return res;
   }
@@ -317,7 +319,7 @@ function basketResult(b) {
     if (!rows.length) return "";
     return `<h3 class="bk-dept">${title}</h3>` + rows.map(([r, x]) => `<label class="bk-row ${checked[r] ? "done" : ""}">
         <input type="checkbox" data-role="${r}" ${checked[r] ? "checked" : ""}>
-        <span class="n">${esc(x.name)}<small>${x.kg ? `${fmt(x.grams / 1000, 1)} кг` : `${x.packs} × ${x.pack >= 1000 ? fmt(x.pack / 1000, 2) + " кг" : x.pack + " г"}`}
+        <span class="n">${esc(x.name)}${x.added ? `<span class="tag">новое</span>` : ""}<small>${x.kg ? `${fmt(x.grams / 1000, 1)} кг` : `${x.packs} × ${x.pack >= 1000 ? fmt(x.pack / 1000, 2) + " кг" : x.pack + " г"}`}
           · нужно ${x.need >= 1000 ? fmt(x.need / 1000, 1) + " кг" : r0(x.need / 10) * 10 + " г"}${!x.kg && x.grams > x.need * 1.8 ? " · останется" : ""}</small></span>
         <span class="k">${rub(x.cost)}</span></label>`).join("");
   }).join("");
@@ -377,6 +379,7 @@ function basketDishSheet(day, meal) {
     ${ks2 ? `<h3 class="bk-dept">Готовить сразу на два раза — ужин и обед завтра${b.people.length > 1 ? ", на двоих" : ""}</h3>
       <table class="bk-table">${cookRows}</table>` : ""}
     ${day >= dayKey() && day <= shiftDay(dayKey(), PLAN_DAYS) ? `<button class="btn" data-a="bkToDiary" data-day="${day}" data-meal="${meal}">Записать мою порцию в дневник</button>` : ""}
+    <button class="btn ghost" data-a="bkSwapList" data-day="${day}" data-meal="${meal}">Заменить блюдо</button>
     <button class="btn ghost" data-a="bkNo" data-id="${dish.id}">Не предлагать это блюдо</button>`);
 }
 
@@ -392,6 +395,72 @@ function mountBasket() {
     cb.closest(".bk-row").classList.toggle("done", cb.checked);
     save();
   }));
+}
+
+/* ---------- Замена одного блюда ---------- */
+// Обед-ужин готовится на два раза: заменяем ужин дня и обед следующего (одна кастрюля). Завтрак и перекус — только этот день.
+function swapSlots(b, day, meal) {
+  const id = b.days.find(x => x.day === day).meals[meal];
+  if (meal === "breakfast" || meal === "snack") return [[day, meal]];
+  const i = b.days.findIndex(x => x.day === day);
+  const pair = meal === "dinner" ? [[day, "dinner"], [b.days[(i + 1) % 7].day, "lunch"]] : [[day, "lunch"], [b.days[(i + 6) % 7].day, "dinner"]];
+  return pair.filter(([d, m]) => b.days.find(x => x.day === d).meals[m] === id);
+}
+// Пересчёт списка: уже выбранные товары остаются, новые продукты — тем же уровнем цен, ненужные уходят
+function recalcBasket(b) {
+  const need = {};
+  for (const { day, meals } of b.days) for (const [m] of BASKET_MEALS) {
+    const dish = DISHES.find(x => x.id === meals[m]), ks = b.portions[day + "|" + m] || [];
+    for (const [r, g] of dish.ing) need[r] = (need[r] || 0) + g * ks.reduce((a, k) => a + k, 0);
+  }
+  const items = {};
+  for (const r in need) {
+    const x = b.items[r];
+    if (x) {
+      const it = [x.name, x.price, x.price, x.pack, x.step ?? (x.kg ? 100 : 0)];
+      items[r] = { ...x, ...itemCost(it, need[r]), need: need[r] };
+    } else {
+      const y = pickItem(r, need[r], b.level ?? 0);
+      items[r] = { name: y.it[0], price: y.it[1], pack: y.it[3], kg: !!y.it[4], step: y.it[4], packs: y.packs, cost: y.cost,
+        grams: y.grams, need: need[r], nut: itemNut(y.it), added: true };
+    }
+  }
+  b.items = items;
+  b.cost = Object.values(items).reduce((a, x) => a + x.cost, 0);
+  b.over = b.cost > b.budget;
+  const eat = planEat(b.days, b.portions, b.items, b.people.length);
+  b.people = b.people.map((x, i) => ({ ...x, eat: eat[i] }));
+  return b;
+}
+function swapDish(b, day, meal, newId) {
+  const nb = JSON.parse(JSON.stringify(b)), dish = DISHES.find(x => x.id === newId);
+  const base = dishNut(dish).kcal;
+  for (const [d, m] of swapSlots(b, day, meal)) {
+    nb.days.find(x => x.day === d).meals[m] = newId;
+    nb.portions[d + "|" + m] = nb.people.map(x => Math.min(2.2, Math.max(0.5, x.kcal * MEAL_SHARE[m] / base)));
+  }
+  return recalcBasket(nb);
+}
+function withStore(b, fn) {
+  storeOverride = b.store;
+  try { return fn(); } finally { storeOverride = null; }
+}
+function swapListSheet(day, meal) {
+  const b = S.basket, cur = b.days.find(x => x.day === day).meals[meal];
+  const kind = meal === "lunch" || meal === "dinner" ? "main" : meal;
+  const inPlan = new Set(b.days.flatMap(x => Object.values(x.meals)));
+  const opts = withStore(b, () => DISHES.filter(x => x.meal === kind && x.id !== cur && dishOk(x) && !(S.basketNo || []).includes(x.id))
+    .map(x => ({ x, delta: swapDish(b, day, meal, x.id).cost - b.cost })))
+    .sort((a, c) => a.delta - c.delta);
+  const slots = swapSlots(b, day, meal);
+  const where = slots.map(([d, m]) => `${m === "lunch" ? "обед" : m === "dinner" ? "ужин" : m === "breakfast" ? "завтрак" : "перекус"} ${shortDate(d)}`).join(" и ");
+  const dlt = v => Math.abs(v) < 20 ? "≈ так же" : (v > 0 ? "+" : "−") + rub(Math.abs(v));
+  openSheet(`<h2>Чем заменить?</h2>
+    <p class="muted small">Заменится ${where}. Список покупок пересчитается${boughtCount() ? ", отметки купленного останутся" : ""}.</p>
+    <div class="list">${opts.map(({ x, delta }) => `<button class="prod" data-a="bkSwap" data-id="${x.id}" data-day="${day}" data-meal="${meal}">
+      <span class="n">${esc(x.name)}${inPlan.has(x.id) ? `<span class="tag">уже в меню</span>` : ""}</span>
+      <span class="k ${delta > 0 ? "" : "plus"}">${dlt(delta)}</span></button>`).join("")}</div>
+    <button class="btn ghost" data-a="closeSheet">Оставить как есть</button>`, true);
 }
 
 const boughtCount = () => Object.values(S.basketChecked || {}).filter(Boolean).length;
@@ -450,6 +519,17 @@ Object.assign(actions, {
     ui.incomingPlan = null; ui.view = "basket";
     save(); closeSheet(); render(); window.scrollTo(0, 0);
     toast("Меню на неделю — у тебя");
+  },
+  bkSwapList(el) { swapListSheet(el.dataset.day, el.dataset.meal); },
+  bkSwap(el) {
+    const b = S.basket, { id, day, meal } = el.dataset, was = b.cost;
+    const nb = withStore(b, () => swapDish(b, day, meal, id));
+    // отметки «куплено» остаются только у товаров, которые есть в новом списке
+    for (const r of Object.keys(S.basketChecked || {})) if (!nb.items[r]) delete S.basketChecked[r];
+    S.basket = nb;
+    save(); closeSheet(); render();
+    const d = nb.cost - was, added = Object.values(nb.items).filter(x => x.added).length;
+    toast(`${DISHES.find(x => x.id === id).name}: ${Math.abs(d) < 20 ? "сумма та же" : (d > 0 ? "+" : "−") + rub(Math.abs(d))}${added ? `, в списке ${added} ${plural(added, ["новый товар", "новых товара", "новых товаров"])}` : ""}`);
   },
   bkPast() { ui.bkPast = !ui.bkPast; render(); },
   bkRebuildYes() { const fn = ui.bkPending; ui.bkPending = null; closeSheet(); fn?.(); },
