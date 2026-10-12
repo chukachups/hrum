@@ -85,9 +85,6 @@ const IS_IOS = /iPhone|iPad|iPod/.test(navigator.userAgent) || (navigator.platfo
 const IS_ANDROID = /Android/i.test(navigator.userAgent);
 const HIDE_INSTALL_KEY = "hrum-install-hidden";
 
-// «Здоровье» есть только на iPhone; после первого импорта показываем всегда
-const healthOn = () => IS_IOS || !!S.healthAt;
-
 function installHidden() {
   if (IS_STANDALONE) return true;
   try { return Date.now() - Number(localStorage.getItem(HIDE_INSTALL_KEY) || 0) < 3 * 864e5; }
@@ -455,7 +452,6 @@ const ICONS = {
   user: '<circle cx="12" cy="8" r="4"/><path d="M4 21c1.5-4 4.5-6 8-6s6.5 2 8 6"/>',
   share: '<path d="M12 15V3M7 8l5-5 5 5"/><path d="M5 13v6a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-6"/>',
   basket: '<path d="M3 9h18l-1.6 9.2a2 2 0 0 1-2 1.8H6.6a2 2 0 0 1-2-1.8L3 9z"/><path d="M8 9l3-5M16 9l-3-5M9 13v3M15 13v3"/>',
-  heart: '<path d="M12 20s-7-4.4-7-10a4 4 0 0 1 7-2.6A4 4 0 0 1 19 10c0 5.6-7 10-7 10z"/>',
   run: '<circle cx="14" cy="4" r="2"/><path d="M8 21l3-6 3 3v3M6 12l3-3 4 1 3 3h3M11 15l-1-4"/>',
 };
 const icon = (k, size = 22) => `<svg width="${size}" height="${size}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${ICONS[k]}</svg>`;
@@ -510,7 +506,7 @@ function viewDiary() {
 
   const workouts = d.ws.map(w => `<button class="row-card" data-a="editWorkout" data-id="${w.id}">
       <span class="badge">${icon("run", 20)}</span>
-      <span class="t"><b>${esc(w.name)}</b><span>${fmt(w.minutes, 0)} мин${w.hk ? " · из Здоровья" : w.manual ? " · по часам" : ""}</span></span>
+      <span class="t"><b>${esc(w.name)}</b><span>${fmt(w.minutes, 0)} мин${w.manual ? " · по часам" : ""}</span></span>
       <span class="p">−${r0(w.kcal)}</span></button>`).join("");
 
   return `
@@ -566,7 +562,6 @@ function viewDiary() {
   <div class="section-title"><h2>Активность</h2><span>${burned ? "−" + r0(burned) + " ккал, в лимит не входят" : "ускоряет похудение"}</span></div>
   ${workouts}
   <button class="row-card dashed" data-a="addWorkout">+ Добавить тренировку</button>
-  ${healthOn() ? `<button class="row-card dashed" data-a="healthImport">${icon("heart", 18)} Вес и тренировки из Здоровья</button>` : ""}
 
   <div class="section-title"><h2>Вес</h2><span>последние записи</span></div>
   ${weightCard()}`;
@@ -808,9 +803,6 @@ function viewProfile() {
       <span class="p">›</span></button>
     <button class="btn ghost" data-a="shareNorm">Отправить мою норму</button>
     <button class="btn ghost" data-a="pasteLink">Вставить ссылку</button>
-    ${healthOn() ? `<div class="section-title"><h2>Здоровье iPhone</h2><span>${S.healthAt ? "последний раз " + shortDate(S.healthAt) : "вес и тренировки"}</span></div>
-    <button class="btn ghost" data-a="healthImport">Вставить из Здоровья</button>
-    <button class="btn ghost" data-a="healthHelp">Как настроить команду</button>` : ""}
     <div class="section-title"><h2>Оформление</h2></div>
     <div class="seg">
       <button data-a="setSkin" data-v="green" aria-pressed="${S.skin !== "cookie"}">Зелёный</button>
@@ -1368,8 +1360,7 @@ function weightSheet() {
       <label class="field"><span>Жир, % (если знаешь)</span><input id="wBf" class="input" inputmode="decimal" value="${fmt(p.bodyFat)}"></label>
     </div>
     <p class="muted small">Взвешивайся утром натощак — так цифры сравнимы между собой. Норма пересчитается автоматически.</p>
-    <button class="btn" data-a="saveWeight">Сохранить</button>
-    ${healthOn() ? `<button class="btn ghost" data-a="healthImport">Взять из Здоровья iPhone</button>` : ""}`);
+    <button class="btn" data-a="saveWeight">Сохранить</button>`);
 }
 
 /* ================= Сканер штрихкода ================= */
