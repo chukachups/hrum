@@ -302,6 +302,9 @@ h2 { font-weight: 500; font-size: 17px; margin: 0; }
 .sport-bonus { margin: 0; font-size: 13px; color: var(--muted); background: var(--accent-soft); border-radius: 10px; padding: 8px 10px; }
 .sport-bonus b { color: var(--ink); }
 .split b:first-child { font-weight: 600; }
+.split-step { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 4px 0; }
+.split-step span { font-size: 15px; }
+.split-step .add:disabled { opacity: .35; }
 
 /* Корзина */
 .over-txt { color: var(--danger); }

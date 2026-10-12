@@ -986,7 +986,7 @@ function gramsSheet(p, meal, entry) {
   const per100 = entry
     ? { id: entry.pid, name: entry.name, kcal: entry.kcal / entry.grams * 100, p: entry.p / entry.grams * 100, f: entry.f / entry.grams * 100, c: entry.c / entry.grams * 100 }
     : p;
-  const portion = !entry && p.recipe && p.recipe.portions ? recipeWeight(p.recipe) / p.recipe.portions : 0;
+  const portion = !entry && p.recipe && p.recipe.portions ? (portionSplit(p.recipe)?.g1 || recipeWeight(p.recipe) / p.recipe.portions) : 0;
   const piece = findProduct(entry ? entry.pid : p.id);
   const pc = piece && piece.pc ? [piece.pc, piece.pcName || "шт"] : null;
   const opts = piece && piece.opts; // готовые порции: «¼ пиццы», «1 порция»
@@ -1072,7 +1072,8 @@ function productSheet(p) {
 
 function recipeInfoSheet(p) {
   const r = p.recipe, c = recipeCalc(r);
-  const portion = r.portions ? c.weight / r.portions : 0;
+  // есть второй человек — порции разные (ниже, «Порции на двоих»), средняя только путает
+  const portion = r.portions && !portionSplit(r) ? c.weight / r.portions : 0;
   openSheet(`<div><h2>${esc(p.name)}</h2><p class="muted small">На 100 г: ${kbju(c.per100)}</p></div>
     <div class="card form">
       <div class="kv"><span>Всё блюдо, ${fmt(c.weight, 0)} г${r.cooked ? " (готовое)" : ""}</span><b>${r0(c.total.kcal)} ккал</b></div>
@@ -1080,7 +1081,7 @@ function recipeInfoSheet(p) {
       <hr class="rule">
       ${r.items.map(x => `<div class="kv"><span>${esc(x.name)}</span><b>${fmt(x.grams, 0)} г</b></div>`).join("")}
     </div>
-    ${splitCard(c, r)}
+    ${splitCard(c, r, p)}
     <button class="btn" data-a="productToDiary" data-id="${p.id}">Добавить в дневник</button>
     <div class="btn-row">
       <button class="btn ghost" data-a="editProduct" data-id="${p.id}">Изменить</button>
@@ -1089,31 +1090,44 @@ function recipeInfoSheet(p) {
     <button class="btn danger" data-a="deleteProduct" data-id="${p.id}">Удалить рецепт</button>`);
 }
 
-// Делим блюдо пропорционально нормам: кому больше калорий — тому больше грамм
-// Делим пропорционально нормам. Если указаны порции — делим один совместный приём (2 порции),
-// а не всю кастрюлю: порция — это еда одного человека на один раз.
-function splitCard(c, r) {
+// Порции рецепта под нормы: из N порций m — мои, остальные — второго человека.
+// Кастрюля делится так, чтобы каждая порция была пропорциональна норме своего человека:
+// моя = вес × моя норма / (m × моя норма + (N − m) × норма второго)
+function portionSplit(r) {
+  const partner = S.partner;
+  if (!partner || !partner.kcal || !r.portions || !S.profile) return null;
+  const n = r.portions, m = Math.min(n, Math.max(0, r.mine ?? Math.ceil(n / 2)));
+  const mine = targets().kcal, w = recipeWeight(r);
+  const unit = w / (m * mine + (n - m) * partner.kcal);
+  return { n, m, mine, other: partner.kcal, g1: unit * mine, g2: unit * partner.kcal };
+}
+
+function splitCard(c, r, p) {
   const partner = S.partner;
   if (!partner || !partner.kcal) {
     return `<button class="row-card dashed" data-a="editPartner">Разделить на двоих — укажи норму второго человека</button>`;
   }
-  const mine = targets().kcal, share = mine / (mine + partner.kcal);
-  const k = c.per100.kcal / 100, pct = Math.round(share * 100);
-  const mealPortions = r.portions ? Math.min(2, r.portions) : 0;
-  const base = mealPortions ? c.weight / r.portions * mealPortions : c.weight;
-  const g1 = base * share, g2 = base - g1;
-  const title = mealPortions
-    ? `На один приём вдвоём — ${mealPortions} ${plural(mealPortions, ["порция", "порции", "порций"])} из ${r.portions}, ${fmt(base, 0)} г`
-    : `Вся кастрюля, ${fmt(base, 0)} г`;
-  const meals = mealPortions && r.portions >= 2 ? Math.floor(r.portions / 2) : 0;
+  const k = c.per100.kcal / 100;
+  if (!r.portions) { // порций нет — делим всю кастрюлю пополам по нормам
+    const share = targets().kcal / (targets().kcal + partner.kcal), g1 = c.weight * share, g2 = c.weight - g1;
+    return `<div class="card form split">
+      <b>Разделить на двоих</b>
+      <span class="muted small">Вся кастрюля, ${fmt(c.weight, 0)} г</span>
+      <div class="kv"><span>Тебе</span><b>${fmt(g1, 0)} г · ${r0(g1 * k)} ккал</b></div>
+      <div class="kv"><span>${esc(partner.name)}</span><b>${fmt(g2, 0)} г · ${r0(g2 * k)} ккал</b></div>
+      <p class="muted small">Укажи в рецепте число порций — тогда разделю их: сколько тебе, сколько ${esc(partner.name)}, каждая под свою норму.</p>
+    </div>`;
+  }
+  const sp = portionSplit(r);
+  const pl = x => `${x} ${plural(x, ["порция", "порции", "порций"])}`;
+  const btn = (d, off) => `<button class="add" data-a="splitMine" data-id="${p.id}" data-d="${d}" ${off ? "disabled" : ""} aria-label="${d > 0 ? "Мне больше" : "Мне меньше"}">${d > 0 ? "+" : "−"}</button>`;
   return `<div class="card form split">
-    <b>Разделить на двоих</b>
-    <span class="muted small">${title}</span>
-    <div class="kv"><span>Тебе (${pct}%)</span><b>${fmt(g1, 0)} г · ${r0(g1 * k)} ккал</b></div>
-    <div class="kv"><span>${esc(partner.name)} (${100 - pct}%)</span><b>${fmt(g2, 0)} г · ${r0(g2 * k)} ккал</b></div>
-    <p class="muted small">Пропорционально нормам: ${r0(mine)} и ${r0(partner.kcal)} ккал в день.${
-      meals > 1 ? ` Блюда хватит на ${meals} ${plural(meals, ["приём", "приёма", "приёмов"])} вдвоём.` : ""}${
-      mealPortions ? "" : " Укажи в рецепте число порций — тогда разделю один приём, а не всю кастрюлю."}</p>
+    <b>Порции на двоих</b>
+    <span class="muted small">${pl(sp.n)}, ${fmt(c.weight, 0)} г — каждая под свою норму</span>
+    <div class="split-step">${btn(-1, sp.m <= 0)}<span>Тебе <b>${sp.m}</b> · ${esc(partner.name)} <b>${sp.n - sp.m}</b></span>${btn(1, sp.m >= sp.n)}</div>
+    ${sp.m ? `<div class="kv"><span>Твоя порция</span><b>${fmt(sp.g1, 0)} г · ${r0(sp.g1 * k)} ккал</b></div>` : ""}
+    ${sp.n - sp.m ? `<div class="kv"><span>Порция: ${esc(partner.name)}</span><b>${fmt(sp.g2, 0)} г · ${r0(sp.g2 * k)} ккал</b></div>` : ""}
+    <p class="muted small">Пропорционально нормам: ${r0(sp.mine)} и ${r0(sp.other)} ккал в день. В дневник по умолчанию записывается твоя порция.</p>
   </div>`;
 }
 
@@ -1512,6 +1526,14 @@ const actions = {
   },
   pickProduct(el) { gramsSheet(findProduct(el.dataset.id), ui.addMeal || mealByTime()); },
   openProduct(el) { productSheet(findProduct(el.dataset.id)); },
+  // сколько порций рецепта — мои (остальные — второго человека)
+  splitMine(el) {
+    const p = S.products.find(x => x.id === el.dataset.id);
+    if (!p?.recipe?.portions) return;
+    const sp = portionSplit(p.recipe);
+    p.recipe.mine = Math.min(sp.n, Math.max(0, sp.m + +el.dataset.d));
+    save(); recipeInfoSheet(p);
+  },
   productToDiary(el) {
     ui.addMeal = mealByTime();
     ui.view = "diary";
@@ -1555,6 +1577,8 @@ const actions = {
     const recipe = { items: rd.items, cooked: rd.cooked, portions: rd.portions };
     let prod;
     if (rd.id) {
+      const old = findProduct(rd.id).recipe; // распределение порций «тебе / второму» — если порций столько же
+      if (old?.mine != null && old.portions === rd.portions) recipe.mine = old.mine;
       prod = Object.assign(findProduct(rd.id), { name: rd.name, ...c.per100, recipe });
     } else {
       prod = { id: "u" + uid(), name: rd.name, ...c.per100, recipe };
