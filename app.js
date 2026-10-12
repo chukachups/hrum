@@ -285,8 +285,9 @@ function garnishOptions(d, meal) {
 
 const norm = s => String(s).toLowerCase().replace(/ё/g, "е").trim();
 const stem = w => (w.length > 4 ? w.slice(0, Math.max(3, w.length - 2)) : w);
-// товары Перекрёстка (perekrestok.js), Глобуса (globus.js — со штрихкодами для сканера) и меню Додо (dodo.js)
+// товары Перекрёстка (perekrestok.js), Глобуса (globus.js — со штрихкодами для сканера), ВкусВилла (vkusvill.js) и меню Додо (dodo.js)
 const STORE = [...(typeof STORE_PRODUCTS !== "undefined" ? STORE_PRODUCTS : []), ...(typeof GLOBUS_PRODUCTS !== "undefined" ? GLOBUS_PRODUCTS : []),
+  ...(typeof VKUSVILL_PRODUCTS !== "undefined" ? VKUSVILL_PRODUCTS : []),
   ...(typeof DODO_PRODUCTS !== "undefined" ? DODO_PRODUCTS : []),
   ...(typeof ALCOHOL_PRODUCTS !== "undefined" ? ALCOHOL_PRODUCTS : [])]; // алкоголь — расчёт по крепости (alcohol.js)
 const allProducts = () => [...S.products, ...BASE_PRODUCTS, ...STORE];
@@ -686,7 +687,7 @@ function productRows(list, action, q) {
       <button class="btn ghost" data-a="newProduct" data-name="${esc(q)}">Создать продукт «${esc(q)}»</button>`;
   }
   return list.map(p => `<button class="prod" data-a="${action}" data-id="${p.id}">
-      <span class="n">${esc(p.name)}${p.id[0] !== "b" && !p.id.startsWith("dd") && !p.id.startsWith("al") ? `<span class="tag">${p.recipe ? "рецепт" : p.id.startsWith("pk") ? "Перекрёсток" : p.id.startsWith("gl") ? "Глобус" : p.barcode ? "штрихкод" : "мой"}</span>` : ""}</span>
+      <span class="n">${esc(p.name)}${p.id[0] !== "b" && !p.id.startsWith("dd") && !p.id.startsWith("al") ? `<span class="tag">${p.recipe ? "рецепт" : p.id.startsWith("pk") ? "Перекрёсток" : p.id.startsWith("gl") ? "Глобус" : p.id.startsWith("vv") ? "ВкусВилл" : p.barcode ? "штрихкод" : "мой"}</span>` : ""}</span>
       <span class="k">${r0(p.kcal)} ккал</span>
       <span class="m">на 100 г · Б ${fmt(p.p)} · Ж ${fmt(p.f)} · У ${fmt(p.c)}</span></button>`).join("");
 }
