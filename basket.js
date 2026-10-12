@@ -14,6 +14,8 @@ const DISHES = [
   ["syrniki", "Сырники со сметаной", "breakfast", 1, [["tvorog", 250], ["eggs", 55], ["oats", 40], ["sourcream", 30], ["oil", 10]], "Овсянку смолоть или взять мелкую; жарить на среднем огне."],
   ["eggsand", "Яичница и бутерброды с сыром", "breakfast", 2, [["eggs", 110], ["bread", 60], ["cheese", 30], ["cucumber", 120]], ""],
   ["yogbowl", "Греческий йогурт с бананом и овсянкой", "breakfast", 2, [["yogurt", 200], ["banana", 120], ["oats", 40]], "Хлопья можно не варить — залить йогуртом с вечера."],
+  // готовая еда (роли r…) есть только во ВкусВилле — блюда появляются, когда он выбран
+  ["vvbreak", "Готовые сырники, запеканка или омлет и яблоко", "breakfast", 2, [["rbreak", 200], ["apple", 150]], "Сырники и запеканку разогреть 1–2 минуты или съесть холодными."],
 
   ["chkbuck", "Курица с гречкой и салатом", "main", 1, [["chicken", 180], ["buckwheat", 60], ["cucumber", 100], ["tomato", 100], ["oil", 10]], "Филе запечь или обжарить, гречку отварить."],
   ["plov", "Плов с курицей", "main", 1, [["thigh", 170], ["rice", 65], ["carrot", 80], ["onion", 50], ["oil", 10]], "Мясо, лук и морковь обжарить, засыпать рис, залить водой на 2 пальца, 25 минут под крышкой."],
@@ -29,6 +31,10 @@ const DISHES = [
   ["turkeyrice", "Индейка с овощами и рисом", "main", 2, [["turkey", 180], ["rice", 60], ["frozenveg", 200], ["oil", 5]], "Индейку кусочками обжарить, добавить овощи на 10 минут."],
   ["thighbake", "Куриные бёдра с картошкой в духовке", "main", 1, [["thigh", 180], ["potato", 200], ["carrot", 60], ["onion", 40], ["oil", 5]], "Всё в форму, 40 минут при 200°."],
   ["cutlets", "Куриные котлеты с макаронами и огурцом", "main", 1, [["mince", 180], ["oats", 15], ["pasta", 60], ["cucumber", 120], ["oil", 5]], "В фарш — овсяные хлопья вместо хлеба; жарить или запечь."],
+  ["vvmeal", "Готовое второе с гарниром и свежие овощи", "main", 2, [["rmeal", 300], ["cucumber", 100], ["tomato", 100]], "Разогреть в микроволновке 2–3 минуты, овощи нарезать."],
+  ["vvcutbuck", "Готовые котлеты с гречкой и огурцом", "main", 2, [["rcutlet", 160], ["buckwheat", 60], ["cucumber", 120]], "Котлеты только разогреть, гречку отварить."],
+  ["vvcutpasta", "Готовые котлеты с макаронами и салатом из капусты", "main", 2, [["rcutlet", 160], ["pasta", 60], ["cabbage", 120], ["carrot", 30], ["oil", 5]], "Котлеты разогреть, капусту и морковь натереть."],
+  ["vvsoup", "Готовый суп и бутерброды с сыром", "main", 2, [["rsoup", 390], ["bread", 60], ["cheese", 40]], "Суп разогреть."],
 
   ["kefirban", "Кефир и банан", "snack", 1, [["kefir", 250], ["banana", 100]], ""],
   ["yogberry", "Йогурт с ягодами", "snack", 2, [["yogurt", 150], ["berries", 80]], ""],
@@ -38,20 +44,33 @@ const DISHES = [
 
 const BASKET_MEALS = [["breakfast", "Завтрак"], ["lunch", "Обед"], ["dinner", "Ужин"], ["snack", "Перекус"]];
 const BASKET_DEPTS = [["meat", "Мясо и птица"], ["fish", "Рыба"], ["dairy", "Молочное и яйца"], ["grain", "Крупы, макароны, хлеб"],
-  ["veg", "Овощи"], ["fruit", "Фрукты и ягоды"], ["other", "Прочее"]];
+  ["veg", "Овощи"], ["fruit", "Фрукты и ягоды"], ["ready", "Готовая еда"], ["other", "Прочее"]];
 const BUDGETS = [5000, 10000, 12000];
 // от «получше» к «подешевле»: какой по цене товар брать в роли (доля списка) и можно ли блюда подороже
 const BASKET_LEVELS = [[0.8, 2], [0.5, 2], [0.25, 2], [0, 2], [0, 1]];
 const rub = n => r0(n).toLocaleString("ru-RU") + " ₽";
 
 const hasBasketData = () => typeof BASKET_DATA !== "undefined";
-// выбранный магазин (если его цен нет — первый, что есть); старые корзины без store — Перекрёсток
+// Выбранные магазины (можно несколько — для каждой позиции берётся товар из любого из них).
+// Старые настройки и корзины знали один магазин (store) — читаем и их
 let storeOverride = null;
-const basketStore = () => (BASKET_DATA.stores[storeOverride] ? storeOverride
-  : BASKET_DATA.stores[S.basketOpts?.store] ? S.basketOpts.store : Object.keys(BASKET_DATA.stores)[0]);
+function basketStores() {
+  const ok = xs => (xs || []).filter(k => BASKET_DATA.stores[k]);
+  const o = S.basketOpts || {};
+  const xs = ok(storeOverride).length ? ok(storeOverride) : ok(o.stores).length ? ok(o.stores) : ok([o.store]);
+  return xs.length ? xs : [Object.keys(BASKET_DATA.stores)[0]];
+}
+const planStores = b => b.stores || [b.store];
 const storeInfo = key => BASKET_DATA.stores[key] || BASKET_DATA.stores.perekrestok || Object.values(BASKET_DATA.stores)[0];
-const roleItems = role => (hasBasketData() && BASKET_DATA.stores[basketStore()].items[role]) || [];
-// [название, обычная цена, цена сейчас, г в упаковке (весовое — 1000), шаг весового г или 0, ккал, Б, Ж, У]
+const storeNames = keys => keys.map(k => storeInfo(k).name).join(" + ");
+// товары роли из всех выбранных магазинов; в конце каждого — ключ магазина
+const roleCache = {};
+function roleItems(role) {
+  if (!hasBasketData()) return [];
+  const keys = basketStores(), id = keys.join(",") + "|" + role;
+  return roleCache[id] ||= keys.flatMap(k => (BASKET_DATA.stores[k].items[role] || []).map(it => [...it, k]));
+}
+// [название, обычная цена, цена сейчас, г в упаковке (весовое — 1000), шаг весового г или 0, ккал, Б, Ж, У, магазин]
 const itemNut = it => ({ kcal: it[5], p: it[6], f: it[7], c: it[8] });
 // Табличное КБЖУ роли — среднее по товарам (для расчёта порций до выбора товара)
 function roleNut(role) {
@@ -153,10 +172,10 @@ function planWeek(budget, seed, no) {
         for (const [r, g] of meals[m].ing) { const n = itemNut(items[r].it); for (const key of KEYS) eat[i][key] += n[key] * g * k / 100; }
       });
     }
-    res = { budget, seed, cost, start, level, cheap, store: basketStore(), people: people.map((p, i) => ({ ...p, eat: eat[i] })),
+    res = { budget, seed, cost, start, level, cheap, stores: basketStores(), people: people.map((p, i) => ({ ...p, eat: eat[i] })),
       days: days.map(d => ({ day: d.day, meals: Object.fromEntries(BASKET_MEALS.map(([m]) => [m, d.meals[m].id])) })),
       portions, items: Object.fromEntries(Object.entries(items).map(([r, x]) => [r, { name: x.it[0], price: x.it[1], pack: x.it[3], kg: !!x.it[4], step: x.it[4],
-        packs: x.packs, cost: x.cost, grams: x.grams, need: x.need, nut: itemNut(x.it) }])) };
+        store: x.it[9], packs: x.packs, cost: x.cost, grams: x.grams, need: x.need, nut: itemNut(x.it) }])) };
     if (cost <= budget) return res;
   }
   res.over = true; // даже самое простое не влезает — показываем его и сколько не хватает
@@ -177,11 +196,11 @@ function planHint(day, meal) {
 function planLink() {
   const b = S.basket, r2 = x => Math.round(x * 100) / 100;
   return location.origin + location.pathname + "#plan=" + packLink({
-    s: b.store, b: b.budget, c: r0(b.cost), o: b.over ? 1 : 0, kc: b.people.map(x => r0(x.kcal)),
+    s: planStores(b), b: b.budget, c: r0(b.cost), o: b.over ? 1 : 0, kc: b.people.map(x => r0(x.kcal)),
     d: b.days.map(d => [d.day, ...BASKET_MEALS.map(([m]) => d.meals[m])]),
     k: b.days.map(d => BASKET_MEALS.map(([m]) => (b.portions[d.day + "|" + m] || []).map(r2))),
     i: Object.fromEntries(Object.entries(b.items).map(([r, x]) => [r, [x.name, x.price, x.pack, x.kg ? 1 : 0, x.packs, r0(x.cost),
-      r0(x.grams), r0(x.need), ...KEYS.map(key => r2(x.nut[key]))]])),
+      r0(x.grams), r0(x.need), ...KEYS.map(key => r2(x.nut[key])), x.store || planStores(b)[0]]])),
   });
 }
 function parsePlanHash() {
@@ -196,8 +215,9 @@ function parsePlanHash() {
     const portions = {};
     days.forEach((x, i) => meals.forEach((mm, j) => { portions[x.day + "|" + mm] = d.k[i][j].slice().reverse(); }));
     const items = Object.fromEntries(Object.entries(d.i).map(([r, v]) => [r, { name: String(v[0]).slice(0, 160), price: +v[1], pack: +v[2], kg: !!v[3],
-      packs: +v[4], cost: +v[5], grams: +v[6], need: +v[7], nut: { kcal: +v[8], p: +v[9], f: +v[10], c: +v[11] } }]));
-    return { store: d.s, budget: +d.b, cost: +d.c, over: !!d.o, kcalFor: d.kc[1], kcalFrom: d.kc[0], days, portions, items };
+      packs: +v[4], cost: +v[5], grams: +v[6], need: +v[7], nut: { kcal: +v[8], p: +v[9], f: +v[10], c: +v[11] },
+      store: String(v[12] || [].concat(d.s)[0]) }]));
+    return { stores: [].concat(d.s).map(String), budget: +d.b, cost: +d.c, over: !!d.o, kcalFor: d.kc[1], kcalFrom: d.kc[0], days, portions, items };
   } catch (e) {
     return null;
   }
@@ -218,7 +238,7 @@ function incomingPlanSheet(pl) {
   const mine = r0(targets().kcal), diff = Math.abs(mine - pl.kcalFor) / mine > 0.05;
   const span = `${shortDate(pl.days[0].day)} – ${shortDate(pl.days[6].day)}`;
   openSheet(`<h2>Тебе прислали меню на неделю</h2>
-    <p>${span} · ${esc(storeInfo(pl.store).name)} · ≈ ${rub(pl.cost)} на двоих.</p>
+    <p>${span} · ${esc(storeNames(pl.stores))} · ≈ ${rub(pl.cost)} на двоих.</p>
     <p class="muted small">Твои порции посчитаны под ${pl.kcalFor} ккал в день. В дневнике у каждого приёма появится «По плану…» —
       записывать еду можно одним нажатием. Список покупок тоже будет у тебя.</p>
     ${diff ? `<p class="note">Твоя норма сейчас ${mine} ккал — порции немного разойдутся. Отправь свою норму (Профиль → «Отправить мою норму»),
@@ -266,15 +286,15 @@ function viewBasket() {
           <button data-a="bkTwo" data-v="1" aria-pressed="${!!o.two}">${S.partner ? `Я и ${esc(S.partner.name)}` : "Нас двое"}</button></div></div>
       ${o.two && !S.partner ? `<p class="note">Чтобы посчитать порции на двоих, Хруму нужна норма второго человека.</p>
         <button class="btn ghost" data-a="editPartner">Указать второго человека</button>` : ""}
-      <div class="field"><span>Магазин</span>
+      <div class="field"><span>Магазины — можно несколько</span>
         <div class="chips">${Object.entries(BASKET_DATA.stores).map(([k, st]) =>
-          `<button class="chip" data-a="bkStore" data-v="${k}" aria-pressed="${basketStore() === k}">${esc(st.name)}</button>`).join("")}
-          <button class="chip" disabled>Пятёрочка · скоро</button></div></div>
+          `<button class="chip" data-a="bkStore" data-v="${k}" aria-pressed="${basketStores().includes(k)}">${esc(st.name)}</button>`).join("")}</div>
+        ${basketStores().length > 1 ? `<span class="muted small">Каждую позицию Хрум возьмёт там, где выгоднее; список покупок — по магазинам.</span>` : ""}</div>
       <button class="btn" data-a="bkBuild">${b ? "Собрать заново" : "Собрать корзину"}</button>
     </section>`;
   return `<header class="top"><h1>Корзина</h1><span class="muted small">меню на неделю под норму</span></header>
     ${stalePrices().length ? `<div class="card note-card"><b>Пора обновить цены</b><span class="muted small">${staleText(stalePrices())}</span></div>` : ""}
-    ${form}${b ? basketResult(b) : `<p class="muted small">Хрум подберёт блюда на 7 дней под ${o.two && S.partner ? "ваши нормы" : "твою норму"} и составит список покупок по ценам выбранного магазина.</p>`}`;
+    ${form}${b ? basketResult(b) : `<p class="muted small">Хрум подберёт блюда на 7 дней под ${o.two && S.partner ? "ваши нормы" : "твою норму"} и составит список покупок по ценам выбранных магазинов.</p>`}`;
 }
 
 function basketResult(b) {
@@ -314,14 +334,12 @@ function basketResult(b) {
       }).join("")}</article>`).join("");
 
   const checked = S.basketChecked || {};
-  const byDept = BASKET_DEPTS.map(([dep, title]) => {
-    const rows = Object.entries(b.items).filter(([r]) => BASKET_DATA.roles[r]?.[1] === dep);
-    if (!rows.length) return "";
-    return `<h3 class="bk-dept">${title}</h3>` + rows.map(([r, x]) => `<label class="bk-row ${checked[r] ? "done" : ""}">
+  const byDept = basketGroups(b).map(({ title, sub, rows }) => {
+    return (title ? `<h3 class="bk-store">${esc(title)}<span>${rub(sub)}</span></h3>` : "") + rows.map(([dt, rs]) => `<h3 class="bk-dept">${dt}</h3>` + rs.map(([r, x]) => `<label class="bk-row ${checked[r] ? "done" : ""}">
         <input type="checkbox" data-role="${r}" ${checked[r] ? "checked" : ""}>
         <span class="n">${esc(x.name)}${x.added ? `<span class="tag">новое</span>` : ""}<small>${x.kg ? `${fmt(x.grams / 1000, 1)} кг` : `${x.packs} × ${x.pack >= 1000 ? fmt(x.pack / 1000, 2) + " кг" : x.pack + " г"}`}
           · нужно ${x.need >= 1000 ? fmt(x.need / 1000, 1) + " кг" : r0(x.need / 10) * 10 + " г"}${!x.kg && x.grams > x.need * 1.8 ? " · останется" : ""}</small></span>
-        <span class="k">${rub(x.cost)}</span></label>`).join("");
+        <span class="k">${rub(x.cost)}</span></label>`).join("")).join("");
   }).join("");
 
   const last = b.days[b.days.length - 1].day;
@@ -339,20 +357,33 @@ function basketResult(b) {
     <section class="card bk-list">${byDept}</section>
     <button class="row-card dashed" data-a="bkShare">${icon("share", 18)} Отправить список покупок</button>
     ${b.people.length > 1 ? `<button class="row-card dashed" data-a="bkSendPlan">${icon("share", 18)} Отправить меню с порциями на телефон: ${esc(b.people[1].name)}</button>` : ""}
-    <p class="muted small">Цены: ${esc(storeInfo(b.store).name)}, ${shortDate(storeInfo(b.store).date)}, обычные — без скидок и карты. В магазине могут немного отличаться.
+    <p class="muted small">Цены: ${planStores(b).map(k => `${esc(storeInfo(k).name)}, ${shortDate(storeInfo(k).date)}`).join("; ")}, обычные — без скидок и карты. В магазине могут немного отличаться.
       Масло, крупы и специи обычно остаются на следующую неделю.</p>`;
 }
 
 const fmtG = g => g >= 1000 ? fmt(g / 1000, 2) + " кг" : r0(g / 10) * 10 + " г";
 
+// Список покупок: по магазинам (если их несколько), внутри — по отделам
+function basketGroups(b) {
+  const def = planStores(b)[0];
+  const used = [...new Set(Object.values(b.items).map(x => x.store || def))];
+  const order = [...planStores(b).filter(k => used.includes(k)), ...used.filter(k => !planStores(b).includes(k))];
+  return order.map(k => {
+    const mine = Object.entries(b.items).filter(([, x]) => (x.store || def) === k);
+    const rows = BASKET_DEPTS.map(([dep, title]) => [title, mine.filter(([r]) => BASKET_DATA.roles[r]?.[1] === dep)]).filter(([, rs]) => rs.length);
+    return { key: k, title: order.length > 1 ? storeInfo(k).name : "", sub: mine.reduce((a, [, x]) => a + x.cost, 0), rows };
+  });
+}
 // Список покупок текстом — в мессенджер (например, тому, кто идёт в магазин)
 function basketText(b) {
-  const lines = [`Список покупок · ${storeInfo(b.store).name} · ≈ ${rub(b.cost)}`];
-  for (const [dep, title] of BASKET_DEPTS) {
-    const rows = Object.entries(b.items).filter(([r]) => BASKET_DATA.roles[r]?.[1] === dep);
-    if (!rows.length) continue;
-    lines.push("", title + ":");
-    for (const [, x] of rows) lines.push(`— ${x.name}, ${x.kg ? fmt(x.grams / 1000, 1) + " кг" : x.packs + " уп."}`);
+  const groups = basketGroups(b);
+  const lines = [`Список покупок · ${storeNames(groups.map(g => g.key))} · ≈ ${rub(b.cost)}`];
+  for (const g of groups) {
+    if (g.title) lines.push("", `=== ${g.title} · ≈ ${rub(g.sub)} ===`);
+    for (const [title, rows] of g.rows) {
+      lines.push("", title + ":");
+      for (const [, x] of rows) lines.push(`— ${x.name}, ${x.kg ? fmt(x.grams / 1000, 1) + " кг" : x.packs + " уп."}`);
+    }
   }
   return lines.join("\n");
 }
@@ -421,7 +452,7 @@ function recalcBasket(b) {
       items[r] = { ...x, ...itemCost(it, need[r]), need: need[r] };
     } else {
       const y = pickItem(r, need[r], b.level ?? 0);
-      items[r] = { name: y.it[0], price: y.it[1], pack: y.it[3], kg: !!y.it[4], step: y.it[4], packs: y.packs, cost: y.cost,
+      items[r] = { name: y.it[0], price: y.it[1], pack: y.it[3], kg: !!y.it[4], step: y.it[4], store: y.it[9], packs: y.packs, cost: y.cost,
         grams: y.grams, need: need[r], nut: itemNut(y.it), added: true };
     }
   }
@@ -442,7 +473,7 @@ function swapDish(b, day, meal, newId) {
   return recalcBasket(nb);
 }
 function withStore(b, fn) {
-  storeOverride = b.store;
+  storeOverride = planStores(b);
   try { return fn(); } finally { storeOverride = null; }
 }
 function swapListSheet(day, meal) {
@@ -489,7 +520,13 @@ Object.assign(actions, {
   bkBudget(el) { S.basketOpts.budget = +el.dataset.v; save(); render(); },
   bkTwo(el) { S.basketOpts.two = el.dataset.v === "1"; save(); render(); },
   hidePrices() { S.pricesHide = dayKey(); save(); render(); },
-  bkStore(el) { S.basketOpts.store = el.dataset.v; save(); render(); },
+  bkStore(el) {
+    const k = el.dataset.v, cur = basketStores();
+    const next = cur.includes(k) ? cur.filter(x => x !== k) : [...cur, k];
+    if (!next.length) { toast("Нужен хотя бы один магазин"); return; }
+    S.basketOpts.stores = next; delete S.basketOpts.store;
+    save(); render();
+  },
   bkBuild() { confirmRebuild(() => buildBasket(S.basket?.seed || 1)); },
   bkReroll() { confirmRebuild(() => buildBasket((S.basket?.seed || 1) + 1)); },
   async bkSendPlan() {
@@ -512,7 +549,7 @@ Object.assign(actions, {
     const people = [{ name: "Ты", kcal: pl.kcalFor, p: me.p * pl.kcalFor / me.kcal, f: me.f * pl.kcalFor / me.kcal, c: me.c * pl.kcalFor / me.kcal, me: true },
       { name: other, kcal: pl.kcalFrom, p: me.p * k, f: me.f * k, c: me.c * k }];
     const eat = planEat(pl.days, pl.portions, pl.items, 2);
-    S.basket = { budget: pl.budget, seed: 1, cost: pl.cost, start: pl.days[0].day, store: pl.store, over: pl.over, shared: true,
+    S.basket = { budget: pl.budget, seed: 1, cost: pl.cost, start: pl.days[0].day, stores: pl.stores, over: pl.over, shared: true,
       people: people.map((x, i) => ({ ...x, eat: eat[i] })), days: pl.days, portions: pl.portions, items: pl.items };
     S.basketChecked = {};
     (S.basketOpts ||= { budget: pl.budget, two: true }).two = true;
