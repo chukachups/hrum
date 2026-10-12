@@ -91,6 +91,11 @@ function pickItem(role, grams, level) {
   const fewest = Math.min(...xs.map(x => x.it[4] ? 1 : x.packs));
   const sane = xs.filter(x => x.it[4] || x.packs <= Math.max(6, fewest * 1.5));
   if (sane.length) xs = sane;
+  // готовая еда заменяет белковое блюдо — у неё «получше» значит больше белка за те же деньги, а не просто дороже
+  if (BASKET_DATA.roles[role]?.[1] === "ready") {
+    xs.sort((a, b) => a.cost / a.it[6] - b.cost / b.it[6]);
+    level = Math.min(level, 0.25); // дальше по списку — дорогие блюда, где за те же деньги белка меньше
+  }
   return xs[Math.min(xs.length - 1, Math.floor(level * (xs.length - 1) + 1e-9))];
 }
 
@@ -104,6 +109,9 @@ function rng(seed) { // mulberry32 — «Другие блюда» дают но
 }
 
 const dishOk = d => d.ing.every(([r]) => roleItems(r).length);
+// блюдо из готовой еды (роли отдела «ready» — есть только во ВкусВилле)
+const isReady = d => d.ing.some(([r]) => BASKET_DATA.roles[r]?.[1] === "ready");
+const readyOn = () => !!S.basketOpts?.ready && DISHES.some(d => isReady(d) && dishOk(d));
 function dishNut(d) {
   const n = { kcal: 0, p: 0, f: 0, c: 0 };
   for (const [r, g] of d.ing) { const x = roleNut(r); for (const k of KEYS) n[k] += x[k] * g / 100; }
@@ -114,15 +122,17 @@ function dishCost(d) { // ₽ за базовую порцию по самому
 }
 
 // Выбор блюд: разные «главные» продукты у обедов-ужинов, в дешёвом режиме — сначала дешёвые
-function chooseDishes(meal, count, maxTier, seed, no, cheap) {
+function chooseDishes(meal, count, maxTier, seed, no, cheap, ready) {
   const rand = rng(seed + meal.length * 7919);
   let pool = DISHES.filter(d => d.meal === meal && d.tier <= maxTier && dishOk(d));
   const allowed = pool.filter(d => !no.includes(d.id));
   if (allowed.length) pool = allowed;
   pool = pool.map(d => ({ d, k: rand() })).sort((a, b) => a.k - b.k).map(x => x.d);
   if (cheap) pool.sort((a, b) => dishCost(a) - dishCost(b));
+  if (ready) pool.sort((a, b) => isReady(b) - isReady(a)); // «побольше готовой еды» — готовые блюда первыми
   const out = [], mains = new Set();
-  for (const d of pool) if (out.length < count && !mains.has(d.ing[0][0])) { out.push(d); mains.add(d.ing[0][0]); }
+  // разные «главные» продукты; в режиме «побольше готовой еды» готовым блюдам повтор котлет не мешает
+  for (const d of pool) if (out.length < count && (!mains.has(d.ing[0][0]) || ready && isReady(d))) { out.push(d); mains.add(d.ing[0][0]); }
   for (const d of pool) if (out.length < count && !out.includes(d)) out.push(d);
   while (out.length && out.length < count) out.push(out[out.length % pool.length]);
   return out;
@@ -143,10 +153,10 @@ function planWeek(budget, seed, no) {
   const start = dayKey();
   let res = null;
   for (const [level, maxTier] of BASKET_LEVELS) {
-    const cheap = maxTier === 1;
-    const br = chooseDishes("breakfast", 3, maxTier, seed, no, cheap);
-    const mains = chooseDishes("main", 7, maxTier, seed, no, cheap);
-    const sn = chooseDishes("snack", 2, maxTier, seed, no, cheap);
+    const cheap = maxTier === 1, ready = readyOn();
+    const br = chooseDishes("breakfast", 3, maxTier, seed, no, cheap, ready);
+    const mains = chooseDishes("main", 7, maxTier, seed, no, cheap, ready);
+    const sn = chooseDishes("snack", 2, maxTier, seed, no, cheap, ready);
     if (!br.length || !mains.length || !sn.length) return null;
     // обед дня = ужин вчерашнего (готовим вечером на два раза); первый обед — блюдо последнего ужина недели
     const days = Array.from({ length: 7 }, (_, d) => ({
@@ -165,7 +175,17 @@ function planWeek(budget, seed, no) {
     }
     const items = {};
     let cost = 0;
-    for (const r in need) { const x = pickItem(r, need[r], level); items[r] = { ...x, need: need[r] }; cost += x.cost; }
+    for (const r in need) items[r] = pickItem(r, need[r], level);
+    // порции считались по средней калорийности роли; у выбранного товара она другая (у готовой еды — заметно) —
+    // пересчитываем порции по нему и докупаем упаковки под новые граммы
+    for (const r in need) need[r] = 0;
+    for (const { day, meals } of days) for (const [m] of BASKET_MEALS) {
+      const dish = meals[m], base = dish.ing.reduce((s, [r, g]) => s + itemNut(items[r].it).kcal * g / 100, 0);
+      const ks = people.map(p => Math.min(2.2, Math.max(0.5, p.kcal * MEAL_SHARE[m] / base)));
+      portions[day + "|" + m] = ks;
+      for (const [r, g] of dish.ing) need[r] += g * ks.reduce((a, b) => a + b, 0);
+    }
+    for (const r in need) { items[r] = { ...items[r], ...itemCost(items[r].it, need[r]), need: need[r] }; cost += items[r].cost; }
     // съедено за неделю — по КБЖУ выбранных товаров
     for (const { day, meals } of days) for (const [m] of BASKET_MEALS) {
       portions[day + "|" + m].forEach((k, i) => {
@@ -290,6 +310,11 @@ function viewBasket() {
         <div class="chips">${Object.entries(BASKET_DATA.stores).map(([k, st]) =>
           `<button class="chip" data-a="bkStore" data-v="${k}" aria-pressed="${basketStores().includes(k)}">${esc(st.name)}</button>`).join("")}</div>
         ${basketStores().length > 1 ? `<span class="muted small">Каждую позицию Хрум возьмёт там, где выгоднее; список покупок — по магазинам.</span>` : ""}</div>
+      ${DISHES.some(d => isReady(d) && dishOk(d)) ? `<div class="field"><span>Готовая еда</span>
+        <div class="seg"><button data-a="bkReady" data-v="0" aria-pressed="${!o.ready}">Немного</button>
+          <button data-a="bkReady" data-v="1" aria-pressed="${!!o.ready}">Побольше</button></div>
+        <span class="muted small">${o.ready ? "Примерно половина обедов и ужинов — готовые: только разогреть. Выходит дороже."
+          : "Готовые блюда изредка, остальное готовится самому."}</span></div>` : ""}
       <button class="btn" data-a="bkBuild">${b ? "Собрать заново" : "Собрать корзину"}</button>
     </section>`;
   return `<header class="top"><h1>Корзина</h1><span class="muted small">меню на неделю под норму</span></header>
@@ -519,6 +544,7 @@ function buildBasket(seed) {
 Object.assign(actions, {
   bkBudget(el) { S.basketOpts.budget = +el.dataset.v; save(); render(); },
   bkTwo(el) { S.basketOpts.two = el.dataset.v === "1"; save(); render(); },
+  bkReady(el) { S.basketOpts.ready = el.dataset.v === "1"; save(); render(); },
   hidePrices() { S.pricesHide = dayKey(); save(); render(); },
   bkStore(el) {
     const k = el.dataset.v, cur = basketStores();
