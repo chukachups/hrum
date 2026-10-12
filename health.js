@@ -83,11 +83,9 @@ function parseHealth(text) {
 function healthSheet() {
   openSheet(`<h2>Из Здоровья</h2>
     <p class="muted small">Вес и тренировки с iPhone, часов и весов Huawei. Чего там нет — вноси вручную, как раньше.</p>
-    <ol class="steps">
-      <li><a class="btn ghost" style="text-decoration:none" href="shortcuts://run-shortcut?name=${encodeURIComponent(HK_SHORTCUT)}">Запустить команду</a>
-        <span class="muted small">Она скопирует данные. Потом вернись сюда.</span></li>
-      <li><button class="btn" data-a="healthPaste">Вставить из Здоровья</button></li>
-    </ol>
+    <a class="btn ghost" style="text-decoration:none" href="shortcuts://run-shortcut?name=${encodeURIComponent(HK_SHORTCUT)}">1. Запустить команду</a>
+    <p class="muted small">Она скопирует данные. Потом вернись сюда.</p>
+    <button class="btn" data-a="healthPaste">2. Вставить из Здоровья</button>
     <textarea id="hkIn" class="input" rows="3" placeholder="Или вставь текст команды сюда вручную" hidden></textarea>
     <p id="hkErr" class="note" hidden></p>
     <button class="btn ghost" data-a="healthHelp">${S.healthAt ? "Как настроить команду" : "Сначала настрой команду — это один раз"}</button>`);
@@ -99,7 +97,7 @@ function healthHelp() {
     <p class="muted small">Делается один раз на каждом iPhone. Названия действий могут чуть отличаться в разных версиях iOS.</p>
     <h3>Если есть часы или весы Huawei</h3>
     <ol class="steps">
-      <li>Huawei Health → «Я» → «Настройки» → «Совместное использование данных и авторизация» → «Здоровье» → включить.</li>
+      <li>Huawei Health → вкладка «Я» → пункт про конфиденциальность или обмен данными («Управление конфиденциальностью», «Обмен данными», «Сторонние сервисы» — зависит от версии) → «Здоровье» → включить. В «Настройках» этого пункта нет.</li>
       <li>В окне «Здоровья» разрешить хотя бы «Вес» и «Тренировки». Проверить: Настройки iPhone → Здоровье → Доступ к данным и устройства → Huawei Health.</li>
       <li>Huawei передаёт данные, когда открыт. Перед командой открой Huawei Health на пару секунд.</li>
     </ol>
