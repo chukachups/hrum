@@ -122,6 +122,8 @@ function dishCost(d) { // ₽ за базовую порцию по самому
 }
 
 // Выбор блюд: разные «главные» продукты у обедов-ужинов, в дешёвом режиме — сначала дешёвые
+// cheap — разброс цены при сортировке «сначала дешёвые» (0 — строго по цене, false — без сортировки):
+// с разбросом «Другие блюда» дают новый набор и в дешёвом режиме
 // ready — «побольше готовой еды»: сколько готовых блюд поставить первыми (0 — как обычно); уровень блюд им не помеха
 function chooseDishes(meal, count, maxTier, seed, no, cheap, ready) {
   const rand = rng(seed + meal.length * 7919);
@@ -129,7 +131,7 @@ function chooseDishes(meal, count, maxTier, seed, no, cheap, ready) {
   const allowed = pool.filter(d => !no.includes(d.id));
   if (allowed.length) pool = allowed;
   pool = pool.map(d => ({ d, k: rand() })).sort((a, b) => a.k - b.k).map(x => x.d);
-  if (cheap) pool.sort((a, b) => dishCost(a) - dishCost(b));
+  if (cheap !== false) pool = pool.map(d => ({ d, k: dishCost(d) * (1 + cheap * rand()) })).sort((a, b) => a.k - b.k).map(x => x.d);
   if (ready) pool = [...pool.filter(isReady).slice(0, ready), ...pool.filter(d => !isReady(d))]; // готовые блюда первыми
   const out = [], mains = new Set();
   // разные «главные» продукты; в режиме «побольше готовой еды» готовым блюдам повтор котлет не мешает
@@ -158,11 +160,13 @@ function planWeek(budget, seed, no) {
   const full = readyOn() ? Infinity : 0;
   const tries = BASKET_LEVELS.map(([level, maxTier]) => [level, maxTier, full]);
   if (full) tries.splice(-1, 1, ...[full, 3, 2, 1].map(n => [0, 1, n]));
-  for (const [level, maxTier, ready] of tries) {
+  // простые блюда — сначала несколько наборов с разбросом цены (у каждого seed свой), не влезло — строго самые дешёвые
+  const jitter = t => [...[0, 1, 2, 3, 4, 5].map(k => [...t, 0.6, seed + k * 104729]), [...t, 0, seed]];
+  for (const [level, maxTier, ready, spread, sd] of tries.flatMap(t => t[1] === 1 ? jitter(t) : [[...t, false, seed]])) {
     const cheap = maxTier === 1;
-    const br = chooseDishes("breakfast", 3, maxTier, seed, no, cheap, ready);
-    const mains = chooseDishes("main", 7, maxTier, seed, no, cheap, ready);
-    const sn = chooseDishes("snack", 2, maxTier, seed, no, cheap, ready);
+    const br = chooseDishes("breakfast", 3, maxTier, sd, no, spread, ready);
+    const mains = chooseDishes("main", 7, maxTier, sd, no, spread, ready);
+    const sn = chooseDishes("snack", 2, maxTier, sd, no, spread, ready);
     if (!br.length || !mains.length || !sn.length) return null;
     // обед дня = ужин вчерашнего (готовим вечером на два раза); первый обед — блюдо последнего ужина недели
     const days = Array.from({ length: 7 }, (_, d) => ({
