@@ -964,21 +964,37 @@ function closeSheet() {
 function addFoodSheet(meal) {
   ui.addMeal = meal;
   openSheet(`<h2>${mealName(meal)}</h2>
-    <input id="fsearch" class="input" type="search" placeholder="Что съел? Например, гречка" autocomplete="off">
+    <input id="fsearch" class="input" type="search" placeholder="${ui.fRecipes ? "Поиск по рецептам" : "Что съел? Например, гречка"}" autocomplete="off">
     <div class="btn-row">
       <button class="btn ghost" data-a="scan">Штрихкод</button>
       <button class="btn ghost" data-a="newProduct">+ Продукт</button>
       <button class="btn ghost" data-a="newRecipe">+ Рецепт</button>
     </div>
+    <div class="seg" id="fseg">
+      <button data-a="fFilter" data-v="" aria-pressed="${!ui.fRecipes}">Все продукты</button>
+      <button data-a="fFilter" data-v="1" aria-pressed="${!!ui.fRecipes}">Мои рецепты · ${S.products.filter(p => p.recipe).length}</button>
+    </div>
     <div id="flabel" class="muted small"></div>
     <div id="flist" class="list"></div>`, true);
   const inp = $("#fsearch");
-  const draw = () => {
-    $("#flabel").textContent = !inp.value && S.recent.length ? "Недавние и все продукты" : "";
-    $("#flist").innerHTML = productRows(searchProducts(inp.value).slice(0, 60), "pickProduct", inp.value);
-  };
-  inp.addEventListener("input", draw);
-  draw();
+  inp.addEventListener("input", drawFoodList);
+  drawFoodList();
+}
+// список в окне «Добавить»: все продукты или только свои рецепты (ui.fRecipes запоминается)
+function drawFoodList() {
+  const inp = $("#fsearch");
+  if (!inp) return;
+  const q = inp.value;
+  if (ui.fRecipes) {
+    const list = searchProducts(q).filter(p => p.recipe);
+    $("#flabel").textContent = !q && list.some(p => S.recent.includes(p.id)) ? "Недавние рецепты — сверху" : "";
+    $("#flist").innerHTML = list.length ? productRows(list.slice(0, 60), "pickProduct", q)
+      : `<p class="muted">${q ? `Среди рецептов нет «${esc(q)}».` : "Рецептов пока нет — добавь первый: ингредиенты, вес готового блюда и порции."}</p>
+        <button class="btn ghost" data-a="newRecipe">+ Рецепт</button>`;
+    return;
+  }
+  $("#flabel").textContent = !q && S.recent.length ? "Недавние и все продукты" : "";
+  $("#flist").innerHTML = productRows(searchProducts(q).slice(0, 60), "pickProduct", q);
 }
 
 function gramsSheet(p, meal, entry) {
@@ -1517,6 +1533,12 @@ const actions = {
     $("#fBf").disabled = on;
   },
   addFood(el) { addFoodSheet(el.dataset.meal); },
+  fFilter(el) {
+    ui.fRecipes = !!el.dataset.v;
+    el.parentElement.querySelectorAll("button").forEach(b => b.setAttribute("aria-pressed", b === el));
+    $("#fsearch").placeholder = ui.fRecipes ? "Поиск по рецептам" : "Что съел? Например, гречка";
+    drawFoodList();
+  },
   scan() {
     ui.scanTarget = null;
     if ($("#sheet").hidden) ui.addMeal = ui.view === "diary" ? mealByTime() : null;
