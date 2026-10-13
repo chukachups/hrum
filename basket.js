@@ -122,14 +122,15 @@ function dishCost(d) { // ₽ за базовую порцию по самому
 }
 
 // Выбор блюд: разные «главные» продукты у обедов-ужинов, в дешёвом режиме — сначала дешёвые
+// ready — «побольше готовой еды»: сколько готовых блюд поставить первыми (0 — как обычно); уровень блюд им не помеха
 function chooseDishes(meal, count, maxTier, seed, no, cheap, ready) {
   const rand = rng(seed + meal.length * 7919);
-  let pool = DISHES.filter(d => d.meal === meal && d.tier <= maxTier && dishOk(d));
+  let pool = DISHES.filter(d => d.meal === meal && (d.tier <= maxTier || ready && isReady(d)) && dishOk(d));
   const allowed = pool.filter(d => !no.includes(d.id));
   if (allowed.length) pool = allowed;
   pool = pool.map(d => ({ d, k: rand() })).sort((a, b) => a.k - b.k).map(x => x.d);
   if (cheap) pool.sort((a, b) => dishCost(a) - dishCost(b));
-  if (ready) pool.sort((a, b) => isReady(b) - isReady(a)); // «побольше готовой еды» — готовые блюда первыми
+  if (ready) pool = [...pool.filter(isReady).slice(0, ready), ...pool.filter(d => !isReady(d))]; // готовые блюда первыми
   const out = [], mains = new Set();
   // разные «главные» продукты; в режиме «побольше готовой еды» готовым блюдам повтор котлет не мешает
   for (const d of pool) if (out.length < count && (!mains.has(d.ing[0][0]) || ready && isReady(d))) { out.push(d); mains.add(d.ing[0][0]); }
@@ -151,9 +152,14 @@ function basketPeople() {
 function planWeek(budget, seed, no) {
   const people = basketPeople();
   const start = dayKey();
-  let res = null;
-  for (const [level, maxTier] of BASKET_LEVELS) {
-    const cheap = maxTier === 1, ready = readyOn();
+  let res = null, readyCost = 0;
+  // «побольше готовой еды» — чтобы не готовить: не влезает — простые блюда и 3, 2, 1 готовых, но не ноль
+  // (лучше показать, сколько не хватает, чем молча вернуть готовку)
+  const full = readyOn() ? Infinity : 0;
+  const tries = BASKET_LEVELS.map(([level, maxTier]) => [level, maxTier, full]);
+  if (full) tries.splice(-1, 1, ...[full, 3, 2, 1].map(n => [0, 1, n]));
+  for (const [level, maxTier, ready] of tries) {
+    const cheap = maxTier === 1;
     const br = chooseDishes("breakfast", 3, maxTier, seed, no, cheap, ready);
     const mains = chooseDishes("main", 7, maxTier, seed, no, cheap, ready);
     const sn = chooseDishes("snack", 2, maxTier, seed, no, cheap, ready);
@@ -196,6 +202,8 @@ function planWeek(budget, seed, no) {
       days: days.map(d => ({ day: d.day, meals: Object.fromEntries(BASKET_MEALS.map(([m]) => [m, d.meals[m].id])) })),
       portions, items: Object.fromEntries(Object.entries(items).map(([r, x]) => [r, { name: x.it[0], price: x.it[1], pack: x.it[3], kg: !!x.it[4], step: x.it[4],
         store: x.it[9], packs: x.packs, cost: x.cost, grams: x.grams, need: x.need, nut: itemNut(x.it) }])) };
+    if (ready === Infinity) readyCost = cost;
+    else if (full) { res.readyCut = true; res.readyCost = readyCost; } // готовой еды меньше, чем просили
     if (cost <= budget) return res;
   }
   res.over = true; // даже самое простое не влезает — показываем его и сколько не хватает
@@ -336,7 +344,9 @@ function basketResult(b) {
         <div class="stat"><b>${rub(b.cost / 7 / b.people.length)}</b><span>в день на человека</span></div>
       </div>
       <hr class="rule">${ppl}
-      ${b.over ? `<p class="note">Даже самые простые блюда не помещаются в ${rub(b.budget)}. Это самый недорогой вариант — проще всего добавить к бюджету ${rub(-left)} или убрать перекусы.</p>`
+      ${b.readyCut ? `<p class="note">Готовой еды меньше, чем просили: на всю неделю с готовыми блюдами нужно примерно ${rub(b.readyCost)}.
+          ${b.over ? `Даже так не хватает ${rub(-left)} — прибавь к бюджету или выбери «Немного».` : "Прибавь к бюджету — и готовить почти не придётся."}</p>` : ""}
+      ${b.over && b.readyCut ? "" : b.over ? `<p class="note">Даже самые простые блюда не помещаются в ${rub(b.budget)}. Это самый недорогой вариант — проще всего добавить к бюджету ${rub(-left)} или убрать перекусы.</p>`
         : left > b.budget * 0.15 ? `<p class="muted small">Взяты товары получше, и всё равно остаётся запас — хватит на чай, специи и фрукты сверх плана.</p>`
         : b.cheap ? `<p class="muted small">Чтобы уложиться, Хрум выбрал недорогие товары и простые блюда.</p>` : ""}
       ${lowP ? `<p class="muted small">Белка выходит меньше нормы — добавь творог или яйца в перекусы.</p>` : ""}
