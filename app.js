@@ -667,19 +667,19 @@ function weightCard() {
 
 function viewProducts() {
   return `<header class="top"><h1>Продукты</h1><span class="muted small">${allProducts().length} в базе</span></header>
-    <input id="psearch" class="input" type="search" placeholder="Поиск по названию" autocomplete="off">
+    <input id="psearch" class="input" type="search" placeholder="${ui.fRecipes ? "Поиск по рецептам" : "Поиск по названию"}" autocomplete="off">
     <div class="btn-row">
       <button class="btn ghost" data-a="scan">Штрихкод</button>
       <button class="btn ghost" data-a="newProduct">+ Продукт</button>
       <button class="btn ghost" data-a="newRecipe">+ Рецепт</button>
     </div>
+    ${recipeSeg()}
+    <div id="plabel" class="muted small"></div>
     <div id="plist" class="list"></div>`;
 }
 function mountProducts() {
-  const inp = $("#psearch");
-  const draw = () => { $("#plist").innerHTML = productRows(searchProducts(inp.value).slice(0, 80), "openProduct", inp.value); };
-  inp.addEventListener("input", draw);
-  draw();
+  $("#psearch").addEventListener("input", drawFoodList);
+  drawFoodList();
 }
 function productRows(list, action, q) {
   if (!list.length) {
@@ -970,31 +970,34 @@ function addFoodSheet(meal) {
       <button class="btn ghost" data-a="newProduct">+ Продукт</button>
       <button class="btn ghost" data-a="newRecipe">+ Рецепт</button>
     </div>
-    <div class="seg" id="fseg">
-      <button data-a="fFilter" data-v="" aria-pressed="${!ui.fRecipes}">Все продукты</button>
-      <button data-a="fFilter" data-v="1" aria-pressed="${!!ui.fRecipes}">Мои рецепты · ${S.products.filter(p => p.recipe).length}</button>
-    </div>
+    ${recipeSeg()}
     <div id="flabel" class="muted small"></div>
     <div id="flist" class="list"></div>`, true);
   const inp = $("#fsearch");
   inp.addEventListener("input", drawFoodList);
   drawFoodList();
 }
-// список в окне «Добавить»: все продукты или только свои рецепты (ui.fRecipes запоминается)
+const recipeSeg = () => `<div class="seg">
+      <button data-a="fFilter" data-v="" aria-pressed="${!ui.fRecipes}">Все продукты</button>
+      <button data-a="fFilter" data-v="1" aria-pressed="${!!ui.fRecipes}">Мои рецепты · ${S.products.filter(p => p.recipe).length}</button>
+    </div>`;
+// список в окне «Добавить» (f…) или на вкладке «Продукты» (p…): все продукты или только свои рецепты
+// (ui.fRecipes общий для обоих и запоминается до перезапуска)
 function drawFoodList() {
-  const inp = $("#fsearch");
+  const sheet = !!$("#fsearch"), id = sheet ? "f" : "p";
+  const inp = $(`#${id}search`);
   if (!inp) return;
-  const q = inp.value;
+  const q = inp.value, action = sheet ? "pickProduct" : "openProduct";
   if (ui.fRecipes) {
     const list = searchProducts(q).filter(p => p.recipe);
-    $("#flabel").textContent = !q && list.some(p => S.recent.includes(p.id)) ? "Недавние рецепты — сверху" : "";
-    $("#flist").innerHTML = list.length ? productRows(list.slice(0, 60), "pickProduct", q)
+    $(`#${id}label`).textContent = !q && list.some(p => S.recent.includes(p.id)) ? "Недавние рецепты — сверху" : "";
+    $(`#${id}list`).innerHTML = list.length ? productRows(list.slice(0, 80), action, q)
       : `<p class="muted">${q ? `Среди рецептов нет «${esc(q)}».` : "Рецептов пока нет — добавь первый: ингредиенты, вес готового блюда и порции."}</p>
         <button class="btn ghost" data-a="newRecipe">+ Рецепт</button>`;
     return;
   }
-  $("#flabel").textContent = !q && S.recent.length ? "Недавние и все продукты" : "";
-  $("#flist").innerHTML = productRows(searchProducts(q).slice(0, 60), "pickProduct", q);
+  $(`#${id}label`).textContent = sheet && !q && S.recent.length ? "Недавние и все продукты" : "";
+  $(`#${id}list`).innerHTML = productRows(searchProducts(q).slice(0, sheet ? 60 : 80), action, q);
 }
 
 function gramsSheet(p, meal, entry) {
@@ -1331,12 +1334,17 @@ function incomingFoodSheet(data) {
   const mine = targets().kcal;
   const ratio = data.kcal ? Math.min(2, Math.max(0.5, mine / data.kcal)) : 1;
   const scaled = Math.abs(ratio - 1) > 0.02;
+  // меню дня — отдельная плашка на каждый приём со своим «под мою норму / как прислали»
+  const groups = data.meal ? [[data.meal, data.items.map((x, i) => [x, i])]]
+    : MEALS.map(([m]) => [m, data.items.map((x, i) => [x, i]).filter(([x]) => x.meal === m)]).filter(([, rows]) => rows.length);
   openSheet(`<h2>${data.meal ? `Тебе прислали: ${mealName(data.meal).toLowerCase()}` : "Тебе прислали меню на день"}</h2>
-    ${scaled ? `<p class="muted small">Прислано под норму ${data.kcal} ккал, твоя — ${r0(mine)}. Граммы пересчитаны под тебя (×${fmt(ratio, 2)}), их можно поправить.</p>
-      <div class="seg" id="fScale"><button data-a="pick" data-val="${ratio}" aria-pressed="true">Под мою норму</button><button data-a="pick" data-val="1" aria-pressed="false">Как прислали</button></div>` : ""}
-    <div class="card form">${data.items.map((x, i) => `<label class="share-row">
-        <span><b>${esc(x.name)}</b><small>${data.meal ? "" : mealName(x.meal) + " · "}${r0(x.kcal)} ккал на 100 г</small></span>
-        <input class="input" inputmode="decimal" data-i="${i}"><span>г</span></label>`).join("")}</div>
+    ${scaled ? `<p class="muted small">Прислано под норму ${data.kcal} ккал, твоя — ${r0(mine)}. Граммы пересчитаны под тебя (×${fmt(ratio, 2)}), их можно поправить${groups.length > 1 ? ". Под себя можно подстроить не все приёмы, а только нужные" : ""}.</p>` : ""}
+    ${groups.map(([m, rows]) => `<div class="card form">
+      ${groups.length > 1 ? `<div class="kv"><b>${mealName(m)}</b><span id="fk-${m}"></span></div>` : ""}
+      ${scaled ? `<div class="seg" data-scale="${m}"><button data-a="pick" data-val="${ratio}" aria-pressed="true">Под мою норму</button><button data-a="pick" data-val="1" aria-pressed="false">Как прислали</button></div>` : ""}
+      ${rows.map(([x, i]) => `<label class="share-row">
+        <span><b>${esc(x.name)}</b><small>${r0(x.kcal)} ккал на 100 г</small></span>
+        <input class="input" inputmode="decimal" data-i="${i}" data-m="${m}"><span>г</span></label>`).join("")}</div>`).join("")}
     ${data.meal ? `<div class="seg" id="fMeal">${MEALS.map(([k, t]) => `<button data-a="pick" data-val="${k}" aria-pressed="${k === data.meal}">${t}</button>`).join("")}</div>` : ""}
     <div class="seg" id="fDay"><button data-a="pick" data-val="${dayKey()}" aria-pressed="true">Сегодня</button><button data-a="pick" data-val="${shiftDay(dayKey(), -1)}" aria-pressed="false">Вчера</button><button data-a="pick" data-val="${shiftDay(dayKey(), 1)}" aria-pressed="false">Завтра</button></div>
     <div class="card preview" id="fPrev"></div>
@@ -1344,13 +1352,17 @@ function incomingFoodSheet(data) {
     <button class="btn" data-a="importFood">Добавить в дневник</button>
     <button class="btn ghost" data-a="closeSheet">Не нужно</button>`, data.items.length > 4);
   const inputs = [...document.querySelectorAll("#sheetBody input[data-i]")];
-  const fill = r => inputs.forEach(inp => { inp.value = Math.max(5, Math.round(data.items[inp.dataset.i].grams * r / 5) * 5); });
+  const fill = (m, r) => inputs.forEach(inp => {
+    if (inp.dataset.m === m) inp.value = Math.max(5, Math.round(data.items[inp.dataset.i].grams * r / 5) * 5);
+  });
   const upd = () => {
-    const t = { kcal: 0, p: 0, f: 0, c: 0 };
+    const t = { kcal: 0, p: 0, f: 0, c: 0 }, byMeal = {};
     for (const inp of inputs) {
       const x = data.items[inp.dataset.i], k = (num(inp.value) || 0) / 100;
       for (const q of KEYS) t[q] += x[q] * k;
+      byMeal[inp.dataset.m] = (byMeal[inp.dataset.m] || 0) + x.kcal * k;
     }
+    for (const m in byMeal) { const el = $(`#fk-${m}`); if (el) el.textContent = `${r0(byMeal[m])} ккал`; }
     $("#fPrev").innerHTML = `<span><b>${r0(t.kcal)}</b> ккал</span><span>Б ${r0(t.p)}</span><span>Ж ${r0(t.f)}</span><span>У ${r0(t.c)}</span>`;
   };
   const replaceNote = () => {
@@ -1363,14 +1375,17 @@ function incomingFoodSheet(data) {
       el.textContent = `Присланное раньше (${names}, ${old.length} ${plural(old.length, ["запись", "записи", "записей"])}) заменится этим. Своё записанное останется.`;
     }
   };
-  let cur = scaled ? ratio : 1;
-  fill(cur); upd(); replaceNote();
+  const cur = {};
+  for (const [m] of groups) { cur[m] = scaled ? ratio : 1; fill(m, cur[m]); }
+  upd(); replaceNote();
   inputs.forEach(inp => inp.addEventListener("input", upd));
-  // выбор дня или приёма не сбрасывает поправленные граммы — только смена «под мою норму / как прислали»
+  // выбор дня или приёма не сбрасывает поправленные граммы — только смена «под мою норму / как прислали» у этого приёма
   ui.onPick = () => {
-    const r = +($('#fScale [aria-pressed="true"]')?.dataset.val || 1);
-    if (r !== cur) { cur = r; fill(r); upd(); }
-    replaceNote();
+    for (const [m] of groups) {
+      const r = +($(`[data-scale="${m}"] [aria-pressed="true"]`)?.dataset.val || 1);
+      if (r !== cur[m]) { cur[m] = r; fill(m, r); }
+    }
+    upd(); replaceNote();
   };
 }
 
@@ -1575,7 +1590,8 @@ const actions = {
   fFilter(el) {
     ui.fRecipes = !!el.dataset.v;
     el.parentElement.querySelectorAll("button").forEach(b => b.setAttribute("aria-pressed", b === el));
-    $("#fsearch").placeholder = ui.fRecipes ? "Поиск по рецептам" : "Что съел? Например, гречка";
+    const inp = $("#fsearch") || $("#psearch");
+    inp.placeholder = ui.fRecipes ? "Поиск по рецептам" : inp.id === "fsearch" ? "Что съел? Например, гречка" : "Поиск по названию";
     drawFoodList();
   },
   scan() {
