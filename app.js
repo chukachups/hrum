@@ -1046,6 +1046,7 @@ function productFormSheet({ barcode = null, name = "", edit = null, note = "" } 
       ${ui.formCtx.barcode ? `<p class="muted small">Штрихкод ${esc(ui.formCtx.barcode)} — в следующий раз найду сразу.</p>` : ""}
       <p id="pErr" class="note" style="color:var(--danger)" hidden></p>
       <button class="btn" type="submit">Сохранить</button>
+      ${ui.scanTarget === "recipe" && !edit ? `<button class="btn ghost" type="button" data-a="rBack">Назад к рецепту</button>` : ""}
     </form>`);
   $("#prodForm").addEventListener("submit", e => {
     e.preventDefault();
@@ -1056,8 +1057,10 @@ function productFormSheet({ barcode = null, name = "", edit = null, note = "" } 
     if (kcal == null || kcal < 0 || kcal > 950) return bad("Калории на 100 г — от 0 до 950.");
     if ([pp, ff, cc].some(v => v == null || v < 0 || v > 100)) return bad("Белки, жиры и углеводы — от 0 до 100 г.");
     let prod;
+    let moved = 0;
     if (edit) {
       prod = Object.assign(edit, { name, kcal, p: pp, f: ff, c: cc });
+      moved = refreshEntries(prod);
     } else {
       prod = { id: "u" + uid(), name, kcal, p: pp, f: ff, c: cc, barcode: ui.formCtx.barcode };
       S.products.unshift(prod);
@@ -1070,7 +1073,7 @@ function productFormSheet({ barcode = null, name = "", edit = null, note = "" } 
     } else {
       closeSheet();
       render();
-      toast("Продукт сохранён");
+      toast(moved ? `Продукт сохранён · пересчитал ${moved} ${plural(moved, ["запись", "записи", "записей"])} с сегодня` : "Продукт сохранён");
     }
   });
 }
@@ -1178,8 +1181,23 @@ function partnerSheet() {
     ${S.partner ? `<button class="btn danger" data-a="clearPartner">Убрать</button>` : ""}`);
 }
 
-function openRecipeEditor(p) {
-  ui.rd = p
+// Недописанный рецепт хранится отдельно: не пропадает, если ушёл за штрихкодом или новым продуктом,
+// закрыл лист или телефон перезагрузил страницу после камеры
+const DRAFT_KEY = "hrum-recipe-draft";
+function loadDraft() {
+  try { return JSON.parse(localStorage.getItem(DRAFT_KEY)); } catch (e) { return null; }
+}
+function keepDraft() {
+  try { localStorage.setItem(DRAFT_KEY, JSON.stringify(ui.rd)); } catch (e) { /* ignore */ }
+}
+function dropDraft() {
+  try { localStorage.removeItem(DRAFT_KEY); } catch (e) { /* ignore */ }
+}
+
+function openRecipeEditor(p, fresh = false) {
+  const d = fresh ? null : loadDraft();
+  if (d && (d.id || null) === (p ? p.id : null) && (d.name || d.items?.length)) ui.rd = d;
+  else ui.rd = p
     ? { id: p.id, name: p.name, items: p.recipe.items.map(x => ({ ...x })), cooked: p.recipe.cooked, portions: p.recipe.portions }
     : { id: null, name: "", items: [], cooked: null, portions: null };
   recipeSheet();
@@ -1190,6 +1208,24 @@ function syncDraft() {
   ui.rd.name = $("#rName").value.trim();
   ui.rd.cooked = num($("#rCooked").value) || null;
   ui.rd.portions = Math.round(num($("#rPortions").value) || 0) || null;
+  keepDraft();
+}
+
+// Продукт или рецепт изменили — записи дневника с сегодняшнего дня (и запланированные) пересчитываются,
+// прошлые дни остаются как были съедены
+function refreshEntries(prod) {
+  const today = dayKey();
+  let n = 0;
+  for (const [day, es] of Object.entries(S.entries)) {
+    if (day < today) continue;
+    for (const e of es) {
+      if (e.pid !== prod.id) continue;
+      const k = e.grams / 100;
+      Object.assign(e, { name: prod.name, kcal: prod.kcal * k, p: prod.p * k, f: prod.f * k, c: prod.c * k });
+      n++;
+    }
+  }
+  return n;
 }
 
 function recipeSheet() {
@@ -1211,7 +1247,10 @@ function recipeSheet() {
     <p class="note">Взвесь готовое блюдо без кастрюли — так учтётся выкипевшая или впитанная вода. Если не взвешивать, считаю по весу сырых продуктов.</p>
     <div class="card preview" id="rSum"></div>
     <p id="rErr" class="note" style="color:var(--danger)" hidden></p>
-    <button class="btn" data-a="rSave">Сохранить рецепт</button>`);
+    <button class="btn" data-a="rSave">Сохранить рецепт</button>
+    ${!rd.id && (rd.name || rd.items.length) ? `<button class="btn ghost" data-a="rReset">Начать заново</button>` : ""}`);
+  keepDraft();
+  ["#rName", "#rCooked", "#rPortions"].forEach(id => $(id).addEventListener("change", syncDraft));
   const upd = () => {
     syncDraft();
     if (!rd.items.length) { $("#rSum").innerHTML = `<span class="muted small">Здесь появится КБЖУ блюда</span>`; return; }
@@ -1594,6 +1633,7 @@ const actions = {
     recipeSheet();
   },
   rIngDelete() { ui.rd.items.splice(ui.rIng.idx, 1); recipeSheet(); },
+  rReset() { dropDraft(); openRecipeEditor(null, true); },
   async rBack() { ui.scanTarget = null; await stopScanner(); recipeSheet(); },
   rSave() {
     syncDraft();
@@ -1604,19 +1644,22 @@ const actions = {
     const c = recipeCalc(rd);
     if (rd.cooked && rd.cooked < c.raw * 0.2) return bad("Вес готового блюда слишком маленький — проверь число.");
     const recipe = { items: rd.items, cooked: rd.cooked, portions: rd.portions };
-    let prod;
+    let prod, moved = 0;
     if (rd.id) {
       const old = findProduct(rd.id).recipe; // деление по нормам остаётся; «тебе / второму» — если порций столько же
       if (old?.split) recipe.split = true;
       if (old?.mine != null && old.portions === rd.portions) recipe.mine = old.mine;
       prod = Object.assign(findProduct(rd.id), { name: rd.name, ...c.per100, recipe });
+      moved = refreshEntries(prod);
     } else {
       prod = { id: "u" + uid(), name: rd.name, ...c.per100, recipe };
       S.products.unshift(prod);
     }
+    dropDraft();
     save();
     if (ui.addMeal && !rd.id) { gramsSheet(prod, ui.addMeal); return; }
-    closeSheet(); render(); toast("Рецепт сохранён");
+    closeSheet(); render();
+    toast(moved ? `Рецепт сохранён · пересчитал ${moved} ${plural(moved, ["запись", "записи", "записей"])} с сегодня` : "Рецепт сохранён");
   },
   async shareRecipe(el) {
     const p = findProduct(el.dataset.id);
