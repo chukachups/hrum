@@ -1974,6 +1974,50 @@ document.addEventListener("focusin", e => {
   if (el.matches?.("input[inputmode=decimal], input[inputmode=numeric]") && el.value) setTimeout(() => el.select(), 0);
 });
 document.addEventListener("keydown", e => { if (e.key === "Escape" && !$("#sheet").hidden) closeSheet(); });
+// Лист закрывается свайпом вниз: тянуть можно, когда он прокручен в самый верх (иначе свайп — обычная прокрутка)
+{
+  const panel = $(".sheet-panel"), back = $(".sheet-backdrop");
+  let drag = null;
+  const reset = () => { panel.style.transition = back.style.transition = ""; panel.style.transform = back.style.opacity = ""; };
+  panel.addEventListener("touchstart", e => {
+    if (e.touches.length !== 1 || e.target.closest("#reader")) { drag = null; return; }
+    const t = e.touches[0];
+    drag = { x: t.clientX, y: t.clientY, t: Date.now(), top: panel.scrollTop <= 0, on: false, dy: 0 };
+  }, { passive: true });
+  panel.addEventListener("touchmove", e => {
+    if (!drag) return;
+    const t = e.touches[0], dx = t.clientX - drag.x, dy = t.clientY - drag.y;
+    if (!drag.on) {
+      if (Math.abs(dx) < 8 && Math.abs(dy) < 8) return;
+      // вбок, вверх или лист не в начале — не мешаем прокрутке
+      if (!drag.top || dy <= 0 || Math.abs(dx) > Math.abs(dy)) { drag = null; return; }
+      drag.on = true;
+      drag.y = t.clientY; // без рывка на первые пиксели
+      document.activeElement?.blur?.();
+    }
+    e.preventDefault();
+    drag.dy = Math.max(0, t.clientY - drag.y);
+    panel.style.transition = back.style.transition = "none";
+    panel.style.transform = `translateY(${drag.dy}px)`;
+    back.style.opacity = String(Math.max(0.2, 1 - drag.dy / panel.offsetHeight));
+  }, { passive: false });
+  const end = () => {
+    if (!drag?.on) { drag = null; return; }
+    const { dy, t } = drag, fast = dy > 40 && dy / (Date.now() - t) > 0.5;
+    drag = null;
+    panel.style.transition = "transform .2s ease-out";
+    back.style.transition = "opacity .2s ease-out";
+    if (dy > Math.min(120, panel.offsetHeight / 4) || fast) {
+      panel.style.transform = "translateY(100%)"; back.style.opacity = "0";
+      setTimeout(() => { closeSheet(); reset(); }, 200);
+    } else {
+      panel.style.transform = ""; back.style.opacity = "";
+      setTimeout(reset, 200);
+    }
+  };
+  panel.addEventListener("touchend", end);
+  panel.addEventListener("touchcancel", end);
+}
 
 /* ================= Отрисовка ================= */
 
