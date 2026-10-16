@@ -180,6 +180,8 @@ h2 { font-weight: 500; font-size: 17px; margin: 0; }
 .option b { display: block; font-weight: 600; }
 .option span { font-size: 13px; color: var(--muted); }
 .chips { display: flex; flex-wrap: wrap; gap: 6px; }
+.chips.days { flex-wrap: nowrap; overflow-x: auto; scrollbar-width: none; margin: 0 -16px; padding: 0 16px; }
+.chips.days .chip { flex: none; }
 .chip { border: 1.5px solid var(--line); background: var(--surface); border-radius: 999px; padding: 7px 12px; font-size: 14px; font-weight: 500; }
 .chip[aria-pressed="true"] { border-color: var(--accent); background: var(--accent-soft); color: var(--accent); }
 .btn {

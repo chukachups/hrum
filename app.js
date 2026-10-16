@@ -1022,6 +1022,7 @@ function gramsSheet(p, meal, entry) {
         : [30, 50, 100, 150, 200, 250, 300].map(g => `<button class="chip" data-a="setGrams" data-g="${g}">${g}</button>`).join("")}</div>
     ${S.partner?.kcal && S.profile ? `<button class="btn ghost" data-a="splitGrams" id="gsplitBtn">Разделить на двоих: ты и ${esc(S.partner.name)}</button>
     <div class="card form split" id="gsplit" hidden></div>` : ""}
+    <div class="chips days" id="daySeg">${dayChips(ui.day || dayKey())}</div>
     <div class="seg" id="mealSeg">${MEALS.map(([k, t]) => `<button data-a="pick" data-val="${k}" aria-pressed="${k === meal}">${t}</button>`).join("")}</div>
     <div class="card preview" id="gprev"></div>
     <button class="btn" data-a="saveGrams">${entry ? "Сохранить" : "Добавить"}</button>
@@ -1034,6 +1035,18 @@ function gramsSheet(p, meal, entry) {
   };
   $("#grams").addEventListener("input", upd);
   upd();
+  $("#daySeg [aria-pressed=true]")?.scrollIntoView({ inline: "center", block: "nearest" });
+}
+
+// День записи: неделя назад (забыл записать) … PLAN_DAYS вперёд (планирую)
+function dayChips(sel) {
+  const t = dayKey(), out = [];
+  for (let n = -7; n <= PLAN_DAYS; n++) {
+    const k = shiftDay(t, n), d = parseDay(k);
+    const label = Math.abs(n) <= 1 ? dayTitle(k) : `${["вс", "пн", "вт", "ср", "чт", "пт", "сб"][d.getDay()]} ${d.getDate()}`;
+    out.push(`<button class="chip" data-a="pick" data-val="${k}" aria-pressed="${k === sel}">${label}</button>`);
+  }
+  return out.join("");
 }
 
 // Общий продукт на двоих (селёдка 200 г на ужин): вес делится пропорционально дневным нормам,
@@ -1837,16 +1850,26 @@ const actions = {
     const g = num($("#grams").value);
     if (!g || g <= 0 || g > 5000) { toast("Укажи вес в граммах"); return; }
     const meal = $('#mealSeg [aria-pressed="true"]').dataset.val;
+    const day = $('#daySeg [aria-pressed="true"]').dataset.val;
     const { p, entry } = ui.gctx;
     const k = g / 100;
     const vals = { grams: g, meal, kcal: p.kcal * k, p: p.p * k, f: p.f * k, c: p.c * k };
-    if (entry) Object.assign(entry, vals);
-    else {
-      (S.entries[ui.day] ||= []).push({ id: uid(), pid: p.id, name: p.name, ...vals });
+    const from = ui.day;
+    if (entry) {
+      Object.assign(entry, vals);
+      if (day !== from) { // перенос записи на другой день
+        S.entries[from] = (S.entries[from] || []).filter(x => x !== entry);
+        if (!S.entries[from].length) delete S.entries[from];
+        (S.entries[day] ||= []).push(entry);
+      }
+    } else {
+      (S.entries[day] ||= []).push({ id: uid(), pid: p.id, name: p.name, ...vals });
       touchRecent(p.id);
     }
+    ui.day = day; // показываем день, куда записали
     save(); closeSheet(); render();
-    toast(entry ? "Сохранено" : `Хрум! +${r0(vals.kcal)} ккал`);
+    const where = day === from ? "" : ` · на ${dayTitle(day).replace(/^[СВЗ]/, c => c.toLowerCase())}`;
+    toast(entry ? `Сохранено${where}` : `Хрум! +${r0(vals.kcal)} ккал${where}`);
   },
   editEntry(el) {
     const e = (S.entries[ui.day] || []).find(x => x.id === el.dataset.id);
