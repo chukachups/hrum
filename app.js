@@ -1620,9 +1620,11 @@ const actions = {
   },
   addFood(el) { addFoodSheet(el.dataset.meal); },
   fFilter(el) {
+    const was = ui.fRecipes;
     ui.fRecipes = !!el.dataset.v;
     el.parentElement.querySelectorAll("button").forEach(b => b.setAttribute("aria-pressed", b === el));
     const inp = $("#fsearch") || $("#psearch");
+    if (was !== ui.fRecipes) inp.value = ""; // «перец» из продуктов среди рецептов только мешает
     inp.placeholder = ui.fRecipes ? "Поиск по рецептам" : inp.id === "fsearch" ? "Что съел? Например, гречка" : "Поиск по названию";
     drawFoodList();
   },
