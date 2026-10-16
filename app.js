@@ -1020,6 +1020,8 @@ function gramsSheet(p, meal, entry) {
       : pc
         ? [1, 2, 3, 4].map(k => `<button class="chip" data-a="setGrams" data-g="${pc[0] * k}">${k} ${pc[1]} · ${pc[0] * k} г</button>`).join("")
         : [30, 50, 100, 150, 200, 250, 300].map(g => `<button class="chip" data-a="setGrams" data-g="${g}">${g}</button>`).join("")}</div>
+    ${S.partner?.kcal && S.profile ? `<button class="btn ghost" data-a="splitGrams" id="gsplitBtn">Разделить на двоих: ты и ${esc(S.partner.name)}</button>
+    <div class="card form split" id="gsplit" hidden></div>` : ""}
     <div class="seg" id="mealSeg">${MEALS.map(([k, t]) => `<button data-a="pick" data-val="${k}" aria-pressed="${k === meal}">${t}</button>`).join("")}</div>
     <div class="card preview" id="gprev"></div>
     <button class="btn" data-a="saveGrams">${entry ? "Сохранить" : "Добавить"}</button>
@@ -1027,9 +1029,26 @@ function gramsSheet(p, meal, entry) {
   const upd = () => {
     const k = (num($("#grams").value) || 0) / 100;
     $("#gprev").innerHTML = `<span><b>${r0(per100.kcal * k)}</b> ккал</span><span>Б ${fmt(per100.p * k)}</span><span>Ж ${fmt(per100.f * k)}</span><span>У ${fmt(per100.c * k)}</span>`;
+    const box = $("#gsplit");
+    if (box && !box.hidden) box.innerHTML = gramsSplitCard(per100, num($("#grams").value) || 0);
   };
   $("#grams").addEventListener("input", upd);
   upd();
+}
+
+// Общий продукт на двоих (селёдка 200 г на ужин): вес делится пропорционально дневным нормам,
+// в дневник пишется своя порция; второму — «Поделиться» приёмом, Хрум у него пересчитает под его норму
+function gramsSplitCard(per100, total) {
+  const mine = targets().kcal, other = S.partner.kcal;
+  const g1 = Math.round(total * mine / (mine + other)), g2 = Math.round(total) - g1;
+  const row = (who, g, norm) => `<div class="kv"><span>${who}</span><b>${g} г · ${r0(per100.kcal * g / 100)} ккал</b></div>
+    <span class="muted small">${norm ? `${r0(per100.kcal * g / norm)}% дневной нормы (${r0(norm)} ккал)` : ""}</span>`;
+  if (!total) return `<b>Разделить на двоих</b><p class="muted small">Укажи общий вес — разделю по нормам.</p>`;
+  return `<b>Разделить на двоих</b>
+    <span class="muted small">Всего ${r0(total)} г — каждому по своей норме</span>
+    ${row("Тебе", g1, mine)}
+    ${row(esc(S.partner.name), g2, other)}
+    <button class="btn" data-a="takeMyShare" data-g="${g1}" data-g2="${g2}">Записать мне ${g1} г</button>`;
 }
 
 function productFormSheet({ barcode = null, name = "", edit = null, note = "" } = {}) {
@@ -1799,6 +1818,19 @@ const actions = {
     S.products = S.products.filter(p => p.id !== el.dataset.id);
     S.recent = S.recent.filter(id => id !== el.dataset.id);
     save(); closeSheet(); render(); toast("Продукт удалён. Записи в дневнике остались.");
+  },
+  splitGrams() {
+    const box = $("#gsplit");
+    box.hidden = !box.hidden;
+    $("#gsplitBtn").textContent = box.hidden ? `Разделить на двоих: ты и ${S.partner.name}` : "Не делить";
+    $("#grams").dispatchEvent(new Event("input"));
+  },
+  takeMyShare(el) {
+    $("#gsplit").hidden = true;
+    $("#gsplitBtn").textContent = `Разделить на двоих: ты и ${S.partner.name}`;
+    $("#grams").value = el.dataset.g;
+    $("#grams").dispatchEvent(new Event("input"));
+    toast(`${S.partner.name} — ${el.dataset.g2} г. Отправь приём через «Поделиться» — Хрум пересчитает под норму ${S.partner.name}`);
   },
   setGrams(el) { $("#grams").value = el.dataset.g; $("#grams").dispatchEvent(new Event("input")); },
   saveGrams() {
