@@ -342,7 +342,7 @@ function foodLink(meal) {
   const r1 = x => Math.round(x * 10) / 10;
   const es = (S.entries[ui.day] || []).filter(e => !meal || e.meal === meal);
   return location.origin + location.pathname + "#food=" + packLink({
-    k: r0(targets().kcal), m: meal || "",
+    k: r0(targets().kcal), m: meal || "", d: ui.day || dayKey(),
     i: es.map(e => [e.meal, e.name, r0(e.grams), ...KEYS.map(k => r1(e[k] / e.grams * 100))]),
   });
 }
@@ -356,7 +356,9 @@ function parseFoodHash() {
       meal: meals.includes(meal) ? meal : "snack", name: String(name).slice(0, 120), grams: +grams, kcal: +kcal, p: +pp, f: +f, c: +c }));
     if (!items.length || items.length > 80 || items.some(x => !(x.grams > 0) || ![x.kcal, x.p, x.f, x.c].every(Number.isFinite))) return null;
     const k = +d.k;
-    return { kcal: k >= 800 && k <= 6000 ? k : null, meal: meals.includes(d.m) ? d.m : null, items };
+    // день, на который записал отправитель: если он в ленте дней — выбран сразу, иначе сегодня
+    const t = dayKey(), day = /^\d{4}-\d{2}-\d{2}$/.test(d.d) && d.d >= shiftDay(t, -7) && d.d <= shiftDay(t, PLAN_DAYS) ? d.d : t;
+    return { kcal: k >= 800 && k <= 6000 ? k : null, meal: meals.includes(d.m) ? d.m : null, day, items };
   } catch (e) {
     return null;
   }
@@ -1378,7 +1380,7 @@ function incomingFoodSheet(data) {
         <span><b>${esc(x.name)}</b><small>${r0(x.kcal)} ккал на 100 г</small></span>
         <input class="input" inputmode="decimal" data-i="${i}" data-m="${m}"><span>г</span></label>`).join("")}</div>`).join("")}
     ${data.meal ? `<div class="seg" id="fMeal">${MEALS.map(([k, t]) => `<button data-a="pick" data-val="${k}" aria-pressed="${k === data.meal}">${t}</button>`).join("")}</div>` : ""}
-    <div class="seg" id="fDay"><button data-a="pick" data-val="${dayKey()}" aria-pressed="true">Сегодня</button><button data-a="pick" data-val="${shiftDay(dayKey(), -1)}" aria-pressed="false">Вчера</button><button data-a="pick" data-val="${shiftDay(dayKey(), 1)}" aria-pressed="false">Завтра</button></div>
+    <div class="chips days" id="fDay">${dayChips(data.day || dayKey())}</div>
     <div class="card preview" id="fPrev"></div>
     <p class="note" id="fReplace" hidden></p>
     <button class="btn" data-a="importFood">Добавить в дневник</button>
@@ -1410,6 +1412,7 @@ function incomingFoodSheet(data) {
   const cur = {};
   for (const [m] of groups) { cur[m] = scaled ? ratio : 1; fill(m, cur[m]); }
   upd(); replaceNote();
+  $("#fDay [aria-pressed=true]")?.scrollIntoView({ inline: "center", block: "nearest" });
   inputs.forEach(inp => inp.addEventListener("input", upd));
   // выбор дня или приёма не сбрасывает поправленные граммы — только смена «под мою норму / как прислали» у этого приёма
   ui.onPick = () => {
