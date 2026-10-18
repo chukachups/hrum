@@ -454,6 +454,7 @@ const ICONS = {
   chart: '<path d="M4 19V5M4 19h16M8 15l4-4 3 3 5-6"/>',
   user: '<circle cx="12" cy="8" r="4"/><path d="M4 21c1.5-4 4.5-6 8-6s6.5 2 8 6"/>',
   share: '<path d="M12 15V3M7 8l5-5 5 5"/><path d="M5 13v6a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-6"/>',
+  copy: '<rect x="9" y="9" width="12" height="12" rx="2"/><path d="M5 15H4a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1h10a1 1 0 0 1 1 1v1"/>',
   basket: '<path d="M3 9h18l-1.6 9.2a2 2 0 0 1-2 1.8H6.6a2 2 0 0 1-2-1.8L3 9z"/><path d="M8 9l3-5M16 9l-3-5M9 13v3M15 13v3"/>',
   run: '<circle cx="14" cy="4" r="2"/><path d="M8 21l3-6 3 3v3M6 12l3-3 4 1 3 3h3M11 15l-1-4"/>',
 };
@@ -503,7 +504,8 @@ function viewDiary() {
       : !items.length && typeof planHint === "function" ? planHint(ui.day, key) : ""; // блюдо из Корзины на этот приём
     return `<article class="meal">
       <div class="meal-head"><h3>${title}</h3><span class="kc">${kc ? r0(kc) + " ккал" : ""}</span>
-        ${items.length ? `<button class="add share" data-a="shareMeal" data-meal="${key}" aria-label="Поделиться: ${title}">${icon("share", 16)}</button>` : ""}
+        ${items.length ? `<button class="add share" data-a="copyMeal" data-meal="${key}" aria-label="Копировать: ${title}">${icon("copy", 16)}</button>
+          <button class="add share" data-a="shareMeal" data-meal="${key}" aria-label="Поделиться: ${title}">${icon("share", 16)}</button>` : ""}
         <button class="add" data-a="addFood" data-meal="${key}" aria-label="Добавить: ${title}">+</button></div>${body}${hint}</article>`;
   }).join("");
 
@@ -1434,6 +1436,36 @@ function foodTarget(d) {
   return { day, meals };
 }
 
+// Копия приёма на другой день или в другой приём (завтрак как сегодня — на завтра)
+function copyMealSheet(meal) {
+  const items = (S.entries[ui.day] || []).filter(e => e.meal === meal);
+  if (!items.length) return;
+  const t = dayKey(), next = shiftDay(ui.day, 1);
+  const def = next >= shiftDay(t, -7) && next <= shiftDay(t, PLAN_DAYS) ? next : t;
+  ui.copyCtx = { from: ui.day, meal };
+  const kc = items.reduce((s, e) => s + e.kcal, 0);
+  openSheet(`<div><h2>Копировать: ${mealName(meal).toLowerCase()}</h2>
+      <p class="muted small">${dayTitle(ui.day)} · ${items.length} ${plural(items.length, ["продукт", "продукта", "продуктов"])}, ${r0(kc)} ккал</p></div>
+    <div class="card form">${items.map(e => `<div class="kv"><span>${esc(e.name)}</span><b>${pieces(e)}${fmt(e.grams, 0)} г</b></div>`).join("")}</div>
+    <p class="muted small">На какой день:</p>
+    <div class="chips days" id="cDay">${dayChips(def)}</div>
+    <div class="seg" id="cMeal">${MEALS.map(([k, t]) => `<button data-a="pick" data-val="${k}" aria-pressed="${k === meal}">${t}</button>`).join("")}</div>
+    <p class="note" id="cNote" hidden></p>
+    <button class="btn" data-a="doCopyMeal">Копировать</button>`);
+  const note = () => {
+    const day = $('#cDay [aria-pressed="true"]').dataset.val, m = $('#cMeal [aria-pressed="true"]').dataset.val;
+    const el = $("#cNote");
+    const same = day === ui.copyCtx.from && m === meal;
+    const n = (S.entries[day] || []).filter(e => e.meal === m).length;
+    el.hidden = !same && !n;
+    el.textContent = same ? "Это тот же приём — выбери другой день или приём."
+      : `Там уже записано: ${n} ${plural(n, ["продукт", "продукта", "продуктов"])} — копия добавится к ним.`;
+  };
+  note();
+  ui.onPick = note;
+  $("#cDay [aria-pressed=true]")?.scrollIntoView({ inline: "center", block: "nearest" });
+}
+
 async function shareFood(meal) {
   const url = foodLink(meal);
   const text = meal
@@ -1768,6 +1800,18 @@ const actions = {
     }
   },
   shareMeal(el) { shareFood(el.dataset.meal); },
+  copyMeal(el) { copyMealSheet(el.dataset.meal); },
+  doCopyMeal() {
+    const { from, meal } = ui.copyCtx;
+    const day = $('#cDay [aria-pressed="true"]').dataset.val, m = $('#cMeal [aria-pressed="true"]').dataset.val;
+    if (day === from && m === meal) { toast("Выбери другой день или приём"); return; }
+    const items = (S.entries[from] || []).filter(e => e.meal === meal);
+    for (const e of items) (S.entries[day] ||= []).push({ ...e, id: uid(), meal: m });
+    const kc = items.reduce((s, e) => s + e.kcal, 0);
+    ui.day = day;
+    save(); closeSheet(); render();
+    toast(`Скопировано: ${mealName(m).toLowerCase()}, ${r0(kc)} ккал · на ${dayTitle(day).replace(/^[СВЗ]/, c => c.toLowerCase())}`);
+  },
   shareDay() { shareFood(null); },
   garnish(el) { garnishSheet(el.dataset.meal); },
   addGarnish(el) {
