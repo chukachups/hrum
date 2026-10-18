@@ -112,7 +112,9 @@ h2 { font-weight: 500; font-size: 17px; margin: 0; }
 
 .meal { background: var(--surface); border-radius: 18px; padding: 2px 14px; }
 .meal-head { display: flex; align-items: center; gap: 8px; padding: 10px 0; }
-.meal-head h3 { margin: 0; font-size: 15px; font-weight: 600; flex: 1; }
+.meal-head .mt { flex: 1; min-width: 0; }
+.meal-head h3 { margin: 0; font-size: 15px; font-weight: 600; }
+.meal-head .mt small { display: block; color: var(--muted); font-size: 12px; margin-top: 1px; }
 .meal-head .kc { color: var(--muted); font-size: 14px; }
 .add {
   border: 0; background: var(--accent-soft); color: var(--accent); width: 32px; height: 32px; border-radius: 50%;

@@ -494,6 +494,8 @@ function viewDiary() {
   const meals = MEALS.map(([key, title]) => {
     const items = d.es.filter(e => e.meal === key);
     const kc = items.reduce((s, e) => s + e.kcal, 0);
+    const sum = k => items.reduce((s, e) => s + (e[k] || 0), 0);
+    const bju = items.length ? `<small>Б ${r0(sum("p"))} · Ж ${r0(sum("f"))} · У ${r0(sum("c"))}</small>` : "";
     const body = items.length
       ? items.map(e => `<button class="item" data-a="editEntry" data-id="${e.id}">
           <span class="n">${esc(e.name)}</span><span class="k">${r0(e.kcal)}</span>
@@ -503,7 +505,7 @@ function viewDiary() {
       ? `<button class="garnish-hint" data-a="garnish" data-meal="${key}">${key === "breakfast" ? "Мало углеводов? Подобрать к завтраку" : "Нет гарнира? Подобрать под норму дня"}</button>`
       : !items.length && typeof planHint === "function" ? planHint(ui.day, key) : ""; // блюдо из Корзины на этот приём
     return `<article class="meal">
-      <div class="meal-head"><h3>${title}</h3><span class="kc">${kc ? r0(kc) + " ккал" : ""}</span>
+      <div class="meal-head"><div class="mt"><h3>${title}</h3>${bju}</div><span class="kc">${kc ? r0(kc) + " ккал" : ""}</span>
         ${items.length ? `<button class="add share" data-a="copyMeal" data-meal="${key}" aria-label="Копировать: ${title}">${icon("copy", 16)}</button>
           <button class="add share" data-a="shareMeal" data-meal="${key}" aria-label="Поделиться: ${title}">${icon("share", 16)}</button>` : ""}
         <button class="add" data-a="addFood" data-meal="${key}" aria-label="Добавить: ${title}">+</button></div>${body}${hint}</article>`;
