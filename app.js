@@ -408,7 +408,9 @@ function searchProducts(q) {
     const atStart = full.every(w => new RegExp("(^|[^a-zа-я0-9])" + w).test(n));
     return (atStart ? 0 : full.every(w => n.includes(w)) ? 4 : 8) + (n.startsWith(words[0]) ? 0 : 2) + (S.recent.includes(p.id) ? 0 : 1);
   };
-  return hits.sort((a, b) => rank(a) - rank(b) || a.name.length - b.name.length);
+  // свои продукты (метки «мой» и «штрихкод») — всегда выше остальных
+  const own = p => p.id[0] === "b" || p.recipe || /^(dd|al|pk|gl|vv)/.test(p.id) ? 1 : 0;
+  return hits.sort((a, b) => own(a) - own(b) || rank(a) - rank(b) || a.name.length - b.name.length);
 }
 
 function touchRecent(id) {
