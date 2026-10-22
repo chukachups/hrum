@@ -343,7 +343,7 @@ function foodLink(meal) {
   const es = (S.entries[ui.day] || []).filter(e => !meal || e.meal === meal);
   return location.origin + location.pathname + "#food=" + packLink({
     k: r0(targets().kcal), m: meal || "", d: ui.day || dayKey(),
-    i: es.map(e => [e.meal, e.name, r0(e.grams), ...KEYS.map(k => r1(e[k] / e.grams * 100))]),
+    i: es.map(e => [e.meal, e.name, r1(e.grams), ...KEYS.map(k => r1(e[k] / e.grams * 100))]),
   });
 }
 function parseFoodHash() {
@@ -1393,7 +1393,9 @@ function incomingFoodSheet(data) {
     <button class="btn ghost" data-a="closeSheet">Не нужно</button>`, data.items.length > 4);
   const inputs = [...document.querySelectorAll("#sheetBody input[data-i]")];
   const fill = (m, r) => inputs.forEach(inp => {
-    if (inp.dataset.m === m) inp.value = Math.max(5, Math.round(data.items[inp.dataset.i].grams * r / 5) * 5);
+    // «как прислали» — ровно граммы отправителя; пересчитанные под норму округляются до 5 г
+    const g = data.items[inp.dataset.i].grams;
+    if (inp.dataset.m === m) inp.value = r === 1 ? fmt(g, 1) : Math.max(5, Math.round(g * r / 5) * 5);
   });
   const upd = () => {
     const t = { kcal: 0, p: 0, f: 0, c: 0 }, byMeal = {};
