@@ -457,6 +457,7 @@ const ICONS = {
   user: '<circle cx="12" cy="8" r="4"/><path d="M4 21c1.5-4 4.5-6 8-6s6.5 2 8 6"/>',
   share: '<path d="M12 15V3M7 8l5-5 5 5"/><path d="M5 13v6a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-6"/>',
   copy: '<rect x="9" y="9" width="12" height="12" rx="2"/><path d="M5 15H4a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1h10a1 1 0 0 1 1 1v1"/>',
+  pot: '<path d="M4 10h16v6a4 4 0 0 1-4 4H8a4 4 0 0 1-4-4v-6zM2 10h2M20 10h2"/><path d="M9 6c0-1 1-1 1-2M14 6c0-1 1-1 1-2"/>',
   basket: '<path d="M3 9h18l-1.6 9.2a2 2 0 0 1-2 1.8H6.6a2 2 0 0 1-2-1.8L3 9z"/><path d="M8 9l3-5M16 9l-3-5M9 13v3M15 13v3"/>',
   run: '<circle cx="14" cy="4" r="2"/><path d="M8 21l3-6 3 3v3M6 12l3-3 4 1 3 3h3M11 15l-1-4"/>',
 };
@@ -509,7 +510,8 @@ function viewDiary() {
     return `<article class="meal">
       <div class="meal-head"><div class="mt"><h3>${title}</h3>${bju}</div><span class="kc">${kc ? r0(kc) + " ккал" : ""}</span>
         ${items.length ? `<button class="add share" data-a="copyMeal" data-meal="${key}" aria-label="Копировать: ${title}">${icon("copy", 16)}</button>
-          <button class="add share" data-a="shareMeal" data-meal="${key}" aria-label="Поделиться: ${title}">${icon("share", 16)}</button>` : ""}
+          <button class="add share" data-a="shareMeal" data-meal="${key}" aria-label="Поделиться: ${title}">${icon("share", 16)}</button>
+          <button class="add share" data-a="mealRecipe" data-meal="${key}" aria-label="Рецепт из приёма: ${title}">${icon("pot", 16)}</button>` : ""}
         <button class="add" data-a="addFood" data-meal="${key}" aria-label="Добавить: ${title}">+</button></div>${body}${hint}</article>`;
   }).join("");
 
@@ -1472,6 +1474,27 @@ function copyMealSheet(meal) {
   $("#cDay [aria-pressed=true]")?.scrollIntoView({ inline: "center", block: "nearest" });
 }
 
+// Блюдо готовили впервые и записали продуктами — отмеченные продукты приёма становятся ингредиентами
+// нового рецепта (граммы как в дневнике), дальше обычный редактор рецепта
+function mealRecipeSheet(meal) {
+  const items = (S.entries[ui.day] || []).filter(e => e.meal === meal && e.grams > 0);
+  if (!items.length) return;
+  ui.mrItems = items;
+  openSheet(`<div><h2>Рецепт из приёма</h2>
+      <p class="muted small">${mealName(meal)} · ${dayTitle(ui.day)}. Отметь продукты, из которых готовилось блюдо.</p></div>
+    <div class="card form" id="mrList">${items.map((e, i) => `<label class="kv check"><input type="checkbox" data-i="${i}" checked>
+      <span>${esc(e.name)}</span><b>${fmt(e.grams, 0)} г</b></label>`).join("")}</div>
+    <p class="note">Граммы возьму из дневника — в рецепте их можно поправить, а ещё указать вес готового блюда и число порций.</p>
+    <button class="btn" data-a="doMealRecipe" id="mrGo">Создать рецепт</button>`);
+  const upd = () => {
+    const n = document.querySelectorAll("#mrList input:checked").length;
+    $("#mrGo").disabled = !n;
+    $("#mrGo").textContent = n ? `Создать рецепт · ${n} ${plural(n, ["продукт", "продукта", "продуктов"])}` : "Отметь продукты";
+  };
+  $("#mrList").addEventListener("change", upd);
+  upd();
+}
+
 async function shareFood(meal) {
   const url = foodLink(meal);
   const text = meal
@@ -1807,6 +1830,17 @@ const actions = {
   },
   shareMeal(el) { shareFood(el.dataset.meal); },
   copyMeal(el) { copyMealSheet(el.dataset.meal); },
+  mealRecipe(el) { mealRecipeSheet(el.dataset.meal); },
+  doMealRecipe() {
+    const items = [...document.querySelectorAll("#mrList input:checked")].map(x => ui.mrItems[+x.dataset.i]);
+    if (!items.length) return;
+    const per = (e, k) => Math.round(e[k] / e.grams * 1000) / 10;
+    ui.addMeal = null;
+    ui.rd = { id: null, name: items.length === 1 ? items[0].name : "", cooked: null, portions: null,
+      items: items.map(e => ({ name: e.name, kcal: per(e, "kcal"), p: per(e, "p"), f: per(e, "f"), c: per(e, "c"), grams: Math.round(e.grams * 10) / 10 })) };
+    ui.mrItems = null;
+    recipeSheet();
+  },
   doCopyMeal() {
     const { from, meal } = ui.copyCtx;
     const day = $('#cDay [aria-pressed="true"]').dataset.val, m = $('#cMeal [aria-pressed="true"]').dataset.val;

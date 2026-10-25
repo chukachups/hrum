@@ -1,5 +1,5 @@
 // Офлайн-кэш оболочки приложения. При изменении файлов увеличивай VERSION.
-const VERSION = "hrum-52";
+const VERSION = "hrum-53";
 const SHELL = [
   "./", "index.html", "styles.css", "app.js", "products.js", "perekrestok.js", "globus.js", "vkusvill.js", "dodo.js", "alcohol.js", "prices.js", "basket.js", "manifest.webmanifest",
   "vendor/html5-qrcode.min.js", "icons/icon-192.png", "icons/icon-512.png", "icons/apple-touch-icon.png", "icons/author.png",
