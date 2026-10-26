@@ -307,11 +307,36 @@ function recipeCalc(r) {
 }
 const recipeWeight = r => recipeCalc(r).weight;
 
+// Рецепт для ссылки: { n, c, s, i } — и в #recipe=, и внутри присланной еды (#food=)
+const recipeData = p => ({ n: p.name, c: p.recipe.cooked || 0, s: p.recipe.portions || 0,
+  i: p.recipe.items.map(x => [x.name, x.grams, ...KEYS.map(k => Math.round(x[k] * 10) / 10)]) });
+function readRecipeData(d) {
+  const items = d.i.map(([name, grams, kcal, pp, f, c]) => ({ name: String(name).slice(0, 120), grams: +grams, kcal: +kcal, p: +pp, f: +f, c: +c }));
+  if (!items.length || items.length > 80 || items.some(x => !(x.grams > 0) || ![x.kcal, x.p, x.f, x.c].every(Number.isFinite))) return null;
+  return { name: String(d.n || "Рецепт").slice(0, 120), recipe: { items, cooked: +d.c || null, portions: +d.s || null } };
+}
 function recipeLink(p) {
-  const data = { n: p.name, c: p.recipe.cooked || 0, s: p.recipe.portions || 0,
-    i: p.recipe.items.map(x => [x.name, x.grams, x.kcal, x.p, x.f, x.c]) };
-  const b64 = btoa(unescape(encodeURIComponent(JSON.stringify(data)))).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
-  return location.origin + location.pathname + "#recipe=" + b64;
+  return location.origin + location.pathname + "#recipe=" + packLink(recipeData(p));
+}
+// Свой рецепт с тем же названием — присланный его обновит, а не ляжет копией
+const ownRecipe = name => S.products.find(p => p.recipe && norm(p.name) === norm(name));
+const sameRecipe = (a, b) => (a.cooked || 0) === (b.cooked || 0) && (a.portions || 0) === (b.portions || 0)
+  && a.items.length === b.items.length && a.items.every((x, i) => x.name === b.items[i].name && Math.abs(x.grams - b.items[i].grams) < 0.5);
+// Сохранить присланный рецепт → { prod, how: "new" | "updated" | "same" }
+function keepRecipe(name, recipe) {
+  const old = ownRecipe(name);
+  if (old && sameRecipe(old.recipe, recipe)) return { prod: old, how: "same" };
+  const r = { ...recipe };
+  if (old) {
+    if (old.recipe.split) r.split = true; // как при правке: деление по нормам остаётся
+    if (old.recipe.mine != null && old.recipe.portions === r.portions) r.mine = old.recipe.mine;
+    Object.assign(old, { ...recipeCalc(r).per100, recipe: r });
+    refreshEntries(old);
+    return { prod: old, how: "updated" };
+  }
+  const prod = { id: "u" + uid(), name, ...recipeCalc(r).per100, recipe: r };
+  S.products.unshift(prod);
+  return { prod, how: "new" };
 }
 // Общие упаковщики данных для ссылок (#norm=…)
 function packLink(obj) {
@@ -341,9 +366,13 @@ function parseNormHash() {
 function foodLink(meal) {
   const r1 = x => Math.round(x * 10) / 10;
   const es = (S.entries[ui.day] || []).filter(e => !meal || e.meal === meal);
+  // блюда-рецепты едут с составом — получатель сможет сохранить рецепт себе
+  const r = {};
+  es.forEach((e, i) => { const p = e.pid && findProduct(e.pid); if (p && p.recipe) r[i] = recipeData(p); });
   return location.origin + location.pathname + "#food=" + packLink({
     k: r0(targets().kcal), m: meal || "", d: ui.day || dayKey(),
     i: es.map(e => [e.meal, e.name, r1(e.grams), ...KEYS.map(k => r1(e[k] / e.grams * 100))]),
+    ...(Object.keys(r).length ? { r } : {}),
   });
 }
 function parseFoodHash() {
@@ -355,6 +384,10 @@ function parseFoodHash() {
     const items = d.i.map(([meal, name, grams, kcal, pp, f, c]) => ({
       meal: meals.includes(meal) ? meal : "snack", name: String(name).slice(0, 120), grams: +grams, kcal: +kcal, p: +pp, f: +f, c: +c }));
     if (!items.length || items.length > 80 || items.some(x => !(x.grams > 0) || ![x.kcal, x.p, x.f, x.c].every(Number.isFinite))) return null;
+    for (const i in d.r || {}) {
+      if (!items[i]) continue;
+      try { const rc = readRecipeData(d.r[i]); if (rc) items[i].recipe = rc.recipe; } catch (e) { /* без рецепта */ }
+    }
     const k = +d.k;
     // день, на который записал отправитель: если он в ленте дней — выбран сразу, иначе сегодня
     const t = dayKey(), day = /^\d{4}-\d{2}-\d{2}$/.test(d.d) && d.d >= shiftDay(t, -7) && d.d <= shiftDay(t, PLAN_DAYS) ? d.d : t;
@@ -369,12 +402,7 @@ function parseRecipeHash() {
   const m = location.hash.match(/^#recipe=([\w-]+)$/);
   if (!m) return null;
   try {
-    let b = m[1].replace(/-/g, "+").replace(/_/g, "/");
-    while (b.length % 4) b += "=";
-    const d = JSON.parse(decodeURIComponent(escape(atob(b))));
-    const items = d.i.map(([name, grams, kcal, pp, f, c]) => ({ name: String(name).slice(0, 120), grams: +grams, kcal: +kcal, p: +pp, f: +f, c: +c }));
-    if (!items.length || items.some(x => !(x.grams > 0) || ![x.kcal, x.p, x.f, x.c].every(Number.isFinite))) return null;
-    return { name: String(d.n || "Рецепт").slice(0, 120), recipe: { items, cooked: +d.c || null, portions: +d.s || null } };
+    return readRecipeData(unpackLink(m[1]));
   } catch (e) {
     return null;
   }
@@ -1343,12 +1371,21 @@ function recipeIngGrams(item, idx) {
     <button class="btn ghost" data-a="rBack">Назад к рецепту</button>`);
 }
 
+// присланный рецепт с тем же названием, что и свой, — обновляет его, а не ложится копией
+function recipeImportBtn(data) {
+  const old = ownRecipe(data.name);
+  if (!old) return `<button class="btn" data-a="importRecipe">Добавить себе</button>`;
+  if (sameRecipe(old.recipe, data.recipe)) return `<p class="note">Этот рецепт уже есть у тебя.</p>`;
+  return `<p class="note">У тебя уже есть «${esc(old.name)}» — состав обновится на присланный.</p>
+    <button class="btn" data-a="importRecipe">Обновить рецепт</button>`;
+}
+
 function incomingRecipeSheet(data) {
   const c = recipeCalc(data.recipe);
   openSheet(`<h2>Тебе прислали рецепт</h2>
     <div><b>${esc(data.name)}</b><p class="muted small">На 100 г: ${kbju(c.per100)}</p></div>
     <div class="card form">${data.recipe.items.map(x => `<div class="kv"><span>${esc(x.name)}</span><b>${fmt(x.grams, 0)} г</b></div>`).join("")}</div>
-    <button class="btn" data-a="importRecipe">Добавить себе</button>
+    ${recipeImportBtn(data)}
     <button class="btn ghost" data-a="closeSheet">Не нужно</button>`);
   ui.incoming = data;
 }
@@ -1371,6 +1408,16 @@ function garnishSheet(meal) {
     <button class="btn ghost" data-a="closeSheet">Закрыть</button>`);
 }
 
+// Под присланным блюдом-рецептом: галочка «сохранить себе» (или «уже есть у тебя»)
+function recipeKeepRow(x, i) {
+  if (!x.recipe) return "";
+  const old = ownRecipe(x.name);
+  if (old && sameRecipe(old.recipe, x.recipe)) return `<p class="muted small">Этот рецепт уже есть у тебя</p>`;
+  const n = x.recipe.items.length;
+  return `<label class="kv check"><input type="checkbox" data-rec="${i}">
+    <span class="small">${old ? "Обновить мой рецепт — прислали другой состав" : `Сохранить рецепт себе · ${n} ${plural(n, ["ингредиент", "ингредиента", "ингредиентов"])}`}</span></label>`;
+}
+
 function incomingFoodSheet(data) {
   ui.incomingFood = data;
   const mine = targets().kcal;
@@ -1386,7 +1433,7 @@ function incomingFoodSheet(data) {
       ${scaled ? `<div class="seg" data-scale="${m}"><button data-a="pick" data-val="${ratio}" aria-pressed="true">Под мою норму</button><button data-a="pick" data-val="1" aria-pressed="false">Как прислали</button></div>` : ""}
       ${rows.map(([x, i]) => `<label class="share-row">
         <span><b>${esc(x.name)}</b><small>${r0(x.kcal)} ккал на 100 г</small></span>
-        <input class="input" inputmode="decimal" data-i="${i}" data-m="${m}"><span>г</span></label>`).join("")}</div>`).join("")}
+        <input class="input" inputmode="decimal" data-i="${i}" data-m="${m}"><span>г</span></label>${recipeKeepRow(x, i)}`).join("")}</div>`).join("")}
     ${data.meal ? `<div class="seg" id="fMeal">${MEALS.map(([k, t]) => `<button data-a="pick" data-val="${k}" aria-pressed="${k === data.meal}">${t}</button>`).join("")}</div>` : ""}
     <div class="chips days" id="fDay">${dayChips(data.day || dayKey())}</div>
     <div class="card preview" id="fPrev"></div>
@@ -1794,10 +1841,9 @@ const actions = {
   },
   importRecipe() {
     const d = ui.incoming;
-    const prod = { id: "u" + uid(), name: d.name, ...recipeCalc(d.recipe).per100, recipe: d.recipe };
-    S.products.unshift(prod);
+    const { how } = keepRecipe(d.name, d.recipe);
     save(); ui.incoming = null; closeSheet(); render();
-    toast(`Рецепт «${d.name}» добавлен`);
+    toast(`Рецепт «${d.name}» ${how === "updated" ? "обновлён" : "добавлен"}`);
   },
   editPartner() { partnerSheet(); },
   applyAdjust(el) {
@@ -1869,19 +1915,28 @@ const actions = {
     // последнее присланное заменяет присланное раньше в те же приёмы; своё не трогаем
     const replaced = sharedIn(day, meals).length;
     if (replaced) S.entries[day] = S.entries[day].filter(e => !(isShared(e) && meals.includes(e.meal)));
+    // отмеченные рецепты — себе в «Мои рецепты»; запись дневника привязывается к рецепту (и к уже бывшему у тебя)
+    const pids = {}, kept = [];
+    d.items.forEach((x, i) => {
+      if (!x.recipe) return;
+      const box = $(`#sheetBody input[data-rec="${i}"]`);
+      if (box?.checked) { const r = keepRecipe(x.name, x.recipe); pids[i] = r.prod.id; kept.push(r.prod.name); }
+      else if (!box) pids[i] = ownRecipe(x.name)?.id;
+    });
     let n = 0, kc = 0;
     for (const inp of document.querySelectorAll("#sheetBody input[data-i]")) {
       const g = num(inp.value);
       if (!g || g <= 0 || g > 5000) continue;
       const x = d.items[inp.dataset.i], k = g / 100;
-      (S.entries[day] ||= []).push({ id: uid(), pid: null, shared: true, name: x.name, meal: meal || x.meal, grams: g,
+      (S.entries[day] ||= []).push({ id: uid(), pid: pids[inp.dataset.i] || null, shared: true, name: x.name, meal: meal || x.meal, grams: g,
         kcal: x.kcal * k, p: x.p * k, f: x.f * k, c: x.c * k });
       n++; kc += x.kcal * k;
     }
-    if (!n) { toast("Укажи граммы"); return; }
+    if (!n && !kept.length) { toast("Укажи граммы"); return; }
     ui.incomingFood = null; ui.day = day; ui.view = "diary";
     save(); closeSheet(); render();
-    toast(`${replaced ? "Заменил присланное раньше. " : ""}Добавлено: ${n} ${plural(n, ["продукт", "продукта", "продуктов"])}, ${r0(kc)} ккал`);
+    const rec = kept.length ? `${kept.length > 1 ? "Рецепты сохранены" : `Рецепт «${kept[0]}» сохранён`} в «Мои рецепты». ` : "";
+    toast(n ? `${replaced ? "Заменил присланное раньше. " : ""}${rec}Добавлено: ${n} ${plural(n, ["продукт", "продукта", "продуктов"])}, ${r0(kc)} ккал` : rec);
   },
   async shareNorm() {
     const url = normLink();
