@@ -322,6 +322,10 @@ function recipeLink(p) {
 const ownRecipe = name => S.products.find(p => p.recipe && norm(p.name) === norm(name));
 const sameRecipe = (a, b) => (a.cooked || 0) === (b.cooked || 0) && (a.portions || 0) === (b.portions || 0)
   && a.items.length === b.items.length && a.items.every((x, i) => x.name === b.items[i].name && Math.abs(x.grams - b.items[i].grams) < 0.5);
+// Рецепт под другую норму: ингредиенты и вес готового × r, порций столько же
+const scaleRecipe = (recipe, r) => r === 1 ? recipe : { ...recipe,
+  items: recipe.items.map(x => ({ ...x, grams: Math.round(x.grams * r * 10) / 10 })),
+  cooked: recipe.cooked ? Math.round(recipe.cooked * r) : recipe.cooked };
 // Сохранить присланный рецепт → { prod, how: "new" | "updated" | "same" }
 function keepRecipe(name, recipe) {
   const old = ownRecipe(name);
@@ -1409,10 +1413,10 @@ function garnishSheet(meal) {
 }
 
 // Под присланным блюдом-рецептом: галочка «сохранить себе» (или «уже есть у тебя»)
-function recipeKeepRow(x, i) {
+function recipeKeepRow(x, i, ratio) {
   if (!x.recipe) return "";
   const old = ownRecipe(x.name);
-  if (old && sameRecipe(old.recipe, x.recipe)) return `<p class="muted small">Этот рецепт уже есть у тебя</p>`;
+  if (old && (sameRecipe(old.recipe, x.recipe) || sameRecipe(old.recipe, scaleRecipe(x.recipe, ratio)))) return `<p class="muted small">Этот рецепт уже есть у тебя</p>`;
   const n = x.recipe.items.length;
   return `<label class="kv check"><input type="checkbox" data-rec="${i}">
     <span class="small">${old ? "Обновить мой рецепт — прислали другой состав" : `Сохранить рецепт себе · ${n} ${plural(n, ["ингредиент", "ингредиента", "ингредиентов"])}`}</span></label>`;
@@ -1433,7 +1437,7 @@ function incomingFoodSheet(data) {
       ${scaled ? `<div class="seg" data-scale="${m}"><button data-a="pick" data-val="${ratio}" aria-pressed="true">Под мою норму</button><button data-a="pick" data-val="1" aria-pressed="false">Как прислали</button></div>` : ""}
       ${rows.map(([x, i]) => `<label class="share-row">
         <span><b>${esc(x.name)}</b><small>${r0(x.kcal)} ккал на 100 г</small></span>
-        <input class="input" inputmode="decimal" data-i="${i}" data-m="${m}"><span>г</span></label>${recipeKeepRow(x, i)}`).join("")}</div>`).join("")}
+        <input class="input" inputmode="decimal" data-i="${i}" data-m="${m}"><span>г</span></label>${recipeKeepRow(x, i, scaled ? ratio : 1)}`).join("")}</div>`).join("")}
     ${data.meal ? `<div class="seg" id="fMeal">${MEALS.map(([k, t]) => `<button data-a="pick" data-val="${k}" aria-pressed="${k === data.meal}">${t}</button>`).join("")}</div>` : ""}
     <div class="chips days" id="fDay">${dayChips(data.day || dayKey())}</div>
     <div class="card preview" id="fPrev"></div>
@@ -1920,7 +1924,10 @@ const actions = {
     d.items.forEach((x, i) => {
       if (!x.recipe) return;
       const box = $(`#sheetBody input[data-rec="${i}"]`);
-      if (box?.checked) { const r = keepRecipe(x.name, x.recipe); pids[i] = r.prod.id; kept.push(r.prod.name); }
+      // «под мою норму» — ингредиенты рецепта тоже под мою норму
+      const m = $(`#sheetBody input[data-i="${i}"]`)?.dataset.m;
+      const sc = +($(`[data-scale="${m}"] [aria-pressed="true"]`)?.dataset.val || 1);
+      if (box?.checked) { const r = keepRecipe(x.name, scaleRecipe(x.recipe, sc)); pids[i] = r.prod.id; kept.push(r.prod.name); }
       else if (!box) pids[i] = ownRecipe(x.name)?.id;
     });
     let n = 0, kc = 0;
