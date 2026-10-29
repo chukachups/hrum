@@ -232,15 +232,16 @@ h2 { font-weight: 500; font-size: 17px; margin: 0; }
   position: fixed; left: 0; right: 0; bottom: 0; z-index: 10; background: var(--surface); border-top: 1px solid var(--line);
   padding: 6px 12px calc(6px + env(safe-area-inset-bottom, 0px));
 }
-.tabs .inner { max-width: 480px; margin: 0 auto; display: grid; grid-template-columns: repeat(6, 1fr); align-items: end; }
+.tabs .inner { max-width: 480px; margin: 0 auto; display: grid; grid-template-columns: repeat(5, 1fr); align-items: end; }
 .tabs button { border: 0; background: none; color: var(--muted); font-size: 11px; font-weight: 500; display: grid; justify-items: center; gap: 3px; padding: 4px 0; }
 .tabs button.on { color: var(--accent); }
 .tabs svg { width: 22px; height: 22px; }
-.tabs .scan .circle {
+.tabs .main { color: var(--ink); font-weight: 700; }
+.tabs .main .circle {
   width: 56px; height: 56px; border-radius: 50%; background: var(--accent); color: var(--accent-ink);
   display: grid; place-items: center; margin-top: -26px; box-shadow: 0 6px 16px -6px var(--accent);
 }
-.tabs .scan svg { width: 26px; height: 26px; }
+.tabs .main svg { width: 26px; height: 26px; }
 
 .toast {
   position: fixed; left: 50%; top: calc(12px + env(safe-area-inset-top, 0px)); transform: translateX(-50%); z-index: 30; box-shadow: 0 8px 24px -10px rgba(0,0,0,.5);

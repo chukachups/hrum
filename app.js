@@ -498,10 +498,9 @@ const icon = (k, size = 22) => `<svg width="${size}" height="${size}" viewBox="0
 function renderTabs() {
   const tab = (v, ic, label) => `<button data-a="tab" data-v="${v}" class="${ui.view === v ? "on" : ""}">${icon(ic)}${label}</button>`;
   $("#tabs").innerHTML = `<div class="inner">
-    ${tab("diary", "diary", "Дневник")}
     ${tab("products", "search", "Продукты")}
-    <button class="scan" data-a="scan" aria-label="Сканировать штрихкод"><span class="circle">${icon("scan")}</span></button>
     ${tab("basket", "basket", "Корзина")}
+    <button data-a="tab" data-v="diary" class="main ${ui.view === "diary" ? "on" : ""}"><span class="circle">${icon("diary", 26)}</span>Дневник</button>
     ${tab("progress", "chart", "Прогресс")}
     ${tab("profile", "user", "Профиль")}
   </div>`;
@@ -1051,6 +1050,7 @@ function gramsSheet(p, meal, entry) {
   const piece = findProduct(entry ? entry.pid : p.id);
   const pc = piece && piece.pc ? [piece.pc, piece.pcName || "шт"] : null;
   const opts = piece && piece.opts; // готовые порции: «¼ пиццы», «1 порция»
+  const rcp = entry && piece && piece.recipe; // запись рецепта: состав на записанную порцию
   const g0 = entry ? entry.grams : portion || (opts ? opts[0][1] : pc ? pc[0] : 100);
   ui.gctx = { p: per100, entry };
   openSheet(`<div><h2>${esc(per100.name)}</h2><p class="muted small">На 100 г: ${kbju(per100)}</p></div>
@@ -1067,6 +1067,7 @@ function gramsSheet(p, meal, entry) {
     <div class="chips days" id="daySeg">${dayChips(ui.day || dayKey())}</div>
     <div class="seg" id="mealSeg">${MEALS.map(([k, t]) => `<button data-a="pick" data-val="${k}" aria-pressed="${k === meal}">${t}</button>`).join("")}</div>
     <div class="card preview" id="gprev"></div>
+    ${rcp ? `<div class="card form" id="gcomp"></div>` : ""}
     <button class="btn" data-a="saveGrams">${entry ? "Сохранить" : "Добавить"}</button>
     ${entry ? `<button class="btn danger" data-a="deleteEntry">Удалить из дневника</button>` : ""}`);
   const upd = () => {
@@ -1074,6 +1075,11 @@ function gramsSheet(p, meal, entry) {
     $("#gprev").innerHTML = `<span><b>${r0(per100.kcal * k)}</b> ккал</span><span>Б ${fmt(per100.p * k)}</span><span>Ж ${fmt(per100.f * k)}</span><span>У ${fmt(per100.c * k)}</span>`;
     const box = $("#gsplit");
     if (box && !box.hidden) box.innerHTML = gramsSplitCard(per100, num($("#grams").value) || 0);
+    if (rcp) {
+      const g = num($("#grams").value) || 0, share = g / (recipeWeight(rcp) || 1);
+      $("#gcomp").innerHTML = `<b>Состав на ${r0(g)} г</b>` + rcp.items.map(x =>
+        `<div class="kv"><span>${esc(x.name)}</span><b>${fmt(x.grams * share, 0)} г</b></div>`).join("");
+    }
   };
   $("#grams").addEventListener("input", upd);
   upd();
