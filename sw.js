@@ -1,8 +1,9 @@
 // Офлайн-кэш оболочки приложения. При изменении файлов увеличивай VERSION.
-const VERSION = "hrum-58";
+const VERSION = "hrum-59";
 const SHELL = [
   "./", "index.html", "styles.css", "app.js", "products.js", "perekrestok.js", "globus.js", "vkusvill.js", "dodo.js", "alcohol.js", "prices.js", "basket.js", "manifest.webmanifest",
   "vendor/html5-qrcode.min.js", "icons/icon-192.png", "icons/icon-512.png", "icons/apple-touch-icon.png", "icons/author.png",
+  "fonts.css", "fonts/comfortaa-cyrillic-0.woff2", "fonts/comfortaa-latin-1.woff2", "fonts/nunito-cyrillic-2.woff2", "fonts/nunito-latin-3.woff2", "fonts/onest-cyrillic-4.woff2", "fonts/onest-latin-5.woff2", "fonts/unbounded-cyrillic-6.woff2", "fonts/unbounded-latin-7.woff2",
 ];
 
 self.addEventListener("install", e => {
@@ -26,17 +27,6 @@ self.addEventListener("fetch", e => {
   if (e.request.method !== "GET") return;
   // Open Food Facts — всегда из сети
   if (url.hostname.endsWith("openfoodfacts.org")) return;
-  // Шрифты — кэшируем при первом получении
-  if (url.hostname.includes("fonts.g")) {
-    e.respondWith(caches.open(VERSION).then(async c => {
-      const hit = await c.match(e.request);
-      if (hit) return hit;
-      const res = await fetch(e.request);
-      c.put(e.request, res.clone());
-      return res;
-    }));
-    return;
-  }
   if (url.origin !== location.origin) return;
   // Своё: сначала сеть (чтобы обновления приходили сразу), без сети — кэш.
   // no-cache: всегда сверяемся с сайтом (если файл тот же — короткий ответ 304), а не берём
