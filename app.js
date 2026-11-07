@@ -504,6 +504,8 @@ function touchRecent(id) {
 }
 
 // → { product } | { missing: true, name? } (нет товара или нет КБЖУ) | { error: true } (сеть)
+// В Open Food Facts вместо пустого названия бывает «unknown», «-» и т. п. — считаем пустым
+const offText = x => { x = String(x || "").trim(); return /^(unknown|inconnu|unbekannt|n\/?a|none|null|undefined|неизвестн\S*|без названия|[-–—?.\s]*)$/i.test(x) ? "" : x; };
 async function fetchOFF(code) {
   const ctrl = new AbortController();
   const timer = setTimeout(() => ctrl.abort(), 10000);
@@ -517,15 +519,17 @@ async function fetchOFF(code) {
     const d = await r.json();
     const pr = d.product;
     if (!pr) return { missing: true };
-    let name = pr.product_name_ru || pr.product_name || "";
-    const brand = (pr.brands || "").split(",")[0].trim();
+    let name = offText(pr.product_name_ru) || offText(pr.product_name);
+    const brand = offText((pr.brands || "").split(",")[0]);
     if (name && brand && !norm(name).includes(norm(brand))) name += ` (${brand})`;
     const n = pr.nutriments || {};
     let kcal = n["energy-kcal_100g"];
     if (kcal == null && n.energy_100g != null) kcal = n.energy_100g / 4.184;
     if (kcal == null) return { missing: true, name };
     const v = x => Math.round((+x || 0) * 10) / 10;
-    return { product: { name: name || `Товар ${code}`, kcal: v(kcal), p: v(n.proteins_100g), f: v(n.fat_100g), c: v(n.carbohydrates_100g) } };
+    const vals = { kcal: v(kcal), p: v(n.proteins_100g), f: v(n.fat_100g), c: v(n.carbohydrates_100g) };
+    if (!name) return { missing: true, vals }; // КБЖУ есть, названия нет — спросим название
+    return { product: { name, ...vals } };
   } catch (e) {
     return { error: true };
   } finally {
@@ -1171,8 +1175,8 @@ function gramsSplitCard(per100, total) {
     <button class="btn" data-a="takeMyShare" data-g="${g1}" data-g2="${g2}">Записать мне ${g1} г</button>`;
 }
 
-function productFormSheet({ barcode = null, name = "", edit = null, note = "" } = {}) {
-  const p = edit || { name, kcal: "", p: "", f: "", c: "" };
+function productFormSheet({ barcode = null, name = "", vals = null, edit = null, note = "" } = {}) {
+  const p = edit || { name, kcal: "", p: "", f: "", c: "", ...vals };
   ui.formCtx = { barcode: edit ? edit.barcode : barcode, edit };
   openSheet(`<h2>${edit ? "Изменить продукт" : "Новый продукт"}</h2>
     ${note ? `<p class="note">${note}</p>` : ""}
@@ -1776,10 +1780,12 @@ async function onCode(code) {
       const tail = "Перепиши КБЖУ с этикетки один раз — дальше Хрум будет узнавать этот товар сразу.";
       const note = off.error
         ? `<b>Не удалось связаться с базой</b> — похоже, нет интернета. Штрихкод ${esc(code)} прочитан. ${tail}`
+        : off.vals
+          ? `<b>КБЖУ нашёл, а названия в базе нет.</b> Впиши, как называется товар, и сверь цифры с этикеткой.`
         : off.name
           ? `<b>Товар есть в базе, но без КБЖУ.</b> Название подставил. ${tail}`
           : `<b>Товара ${esc(code)} нет в открытой базе</b> — с российскими товарами так бывает часто. ${tail}`;
-      productFormSheet({ barcode: code, name: off.name || "", note });
+      productFormSheet({ barcode: code, name: off.name || "", vals: off.vals, note });
     }
   } finally {
     ui.codeBusy = false;
