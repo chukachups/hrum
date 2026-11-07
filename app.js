@@ -342,6 +342,22 @@ function keepRecipe(name, recipe) {
   S.products.unshift(prod);
   return { prod, how: "new" };
 }
+// Присланный продукт (не рецепт): такой же уже есть — он; свой с тем же названием — обновится; иначе новый
+const sameKbju = (a, b) => KEYS.every(k => Math.abs(a[k] - b[k]) < 0.5);
+const knownProduct = x => allProducts().find(p => !p.recipe && norm(p.name) === norm(x.name) && sameKbju(p, x));
+const ownProduct = name => S.products.find(p => !p.recipe && p.id[0] === "u" && norm(p.name) === norm(name));
+// → { prod, how: "new" | "updated" | "same" }
+function keepProduct(x) {
+  const same = knownProduct(x);
+  if (same) return { prod: same, how: "same" };
+  const r1 = v => Math.round(v * 10) / 10;
+  const k = { kcal: r1(x.kcal), p: r1(x.p), f: r1(x.f), c: r1(x.c) };
+  const old = ownProduct(x.name);
+  if (old) { Object.assign(old, k); refreshEntries(old); return { prod: old, how: "updated" }; }
+  const prod = { id: "u" + uid(), name: x.name, ...k };
+  S.products.unshift(prod);
+  return { prod, how: "new" };
+}
 // Общие упаковщики данных для ссылок (#norm=…)
 function packLink(obj) {
   return btoa(unescape(encodeURIComponent(JSON.stringify(obj)))).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
@@ -991,6 +1007,7 @@ function openSheet(html, tall = false) {
   $(".sheet-panel").classList.toggle("tall", tall);
   $("#sheet").hidden = false;
   document.body.style.overflow = "hidden";
+  syncBackGuard();
 }
 // Закрывает сразу (синхронно), чтобы следующий openSheet не стёрся; камера гасится в фоне
 function closeSheet() {
@@ -1000,6 +1017,7 @@ function closeSheet() {
   $("#sheetBody").innerHTML = "";
   document.body.style.overflow = "";
   if (ui.view !== "setup") ui.onPick = null;
+  syncBackGuard();
 }
 
 function addFoodSheet(meal) {
@@ -1069,6 +1087,7 @@ function gramsSheet(p, meal, entry) {
     <div class="card preview" id="gprev"></div>
     ${rcp ? `<div class="card form" id="gcomp"></div>` : ""}
     <button class="btn" data-a="saveGrams">${entry ? "Сохранить" : "Добавить"}</button>
+    ${entry && !piece ? `<button class="btn ghost" data-a="keepEntry">Сохранить себе в продукты</button>` : ""}
     ${entry ? `<button class="btn danger" data-a="deleteEntry">Удалить из дневника</button>` : ""}`);
   const upd = () => {
     const k = (num($("#grams").value) || 0) / 100;
@@ -1420,7 +1439,11 @@ function garnishSheet(meal) {
 
 // Под присланным блюдом-рецептом: галочка «сохранить себе» (или «уже есть у тебя»)
 function recipeKeepRow(x, i, ratio) {
-  if (!x.recipe) return "";
+  if (!x.recipe) {
+    if (knownProduct(x)) return "";
+    return `<label class="kv check"><input type="checkbox" data-keep="${i}">
+    <span class="small">${ownProduct(x.name) ? "Обновить мой продукт — прислали другое КБЖУ" : "Сохранить себе в продукты"}</span></label>`;
+  }
   const old = ownRecipe(x.name);
   if (old && (sameRecipe(old.recipe, x.recipe) || sameRecipe(old.recipe, scaleRecipe(x.recipe, ratio)))) return `<p class="muted small">Этот рецепт уже есть у тебя</p>`;
   const n = x.recipe.items.length;
@@ -1449,6 +1472,8 @@ function incomingFoodSheet(data) {
     <div class="card preview" id="fPrev"></div>
     <p class="note" id="fReplace" hidden></p>
     <button class="btn" data-a="importFood">Добавить в дневник</button>
+    ${data.items.some(x => x.recipe ? !ownRecipe(x.name) || !sameRecipe(ownRecipe(x.name).recipe, x.recipe) : !knownProduct(x))
+      ? `<button class="btn ghost" data-a="importFood" data-only="1">Только сохранить себе</button>` : ""}
     <button class="btn ghost" data-a="closeSheet">Не нужно</button>`, data.items.length > 4);
   const inputs = [...document.querySelectorAll("#sheetBody input[data-i]")];
   const fill = (m, r) => inputs.forEach(inp => {
@@ -1918,15 +1943,18 @@ const actions = {
     save(); closeSheet(); render();
     toast(`Хрум! +${r0(p.kcal * k)} ккал`);
   },
-  importFood() {
+  importFood(el) {
     const d = ui.incomingFood;
+    // «только сохранить» — всё присланное себе в продукты и рецепты, дневник не трогаем
+    const only = !!el?.dataset.only;
+    if (only) document.querySelectorAll("#sheetBody input[data-rec], #sheetBody input[data-keep]").forEach(b => { b.checked = true; });
     const { day, meals } = foodTarget(d);
     const meal = d.meal && meals[0];
     // последнее присланное заменяет присланное раньше в те же приёмы; своё не трогаем
-    const replaced = sharedIn(day, meals).length;
+    const replaced = only ? 0 : sharedIn(day, meals).length;
     if (replaced) S.entries[day] = S.entries[day].filter(e => !(isShared(e) && meals.includes(e.meal)));
     // отмеченные рецепты — себе в «Мои рецепты»; запись дневника привязывается к рецепту (и к уже бывшему у тебя)
-    const pids = {}, kept = [];
+    const pids = {}, kept = [], keptP = [];
     d.items.forEach((x, i) => {
       if (!x.recipe) return;
       const box = $(`#sheetBody input[data-rec="${i}"]`);
@@ -1936,8 +1964,15 @@ const actions = {
       if (box?.checked) { const r = keepRecipe(x.name, scaleRecipe(x.recipe, sc)); pids[i] = r.prod.id; kept.push(r.prod.name); }
       else if (!box) pids[i] = ownRecipe(x.name)?.id;
     });
+    // отмеченные продукты — в «Мои продукты»; уже бывший у тебя такой же — запись привяжется к нему
+    d.items.forEach((x, i) => {
+      if (x.recipe) return;
+      const box = $(`#sheetBody input[data-keep="${i}"]`);
+      if (box?.checked) { const r = keepProduct(x); pids[i] = r.prod.id; keptP.push(r.prod.name); }
+      else if (!box) pids[i] = knownProduct(x)?.id;
+    });
     let n = 0, kc = 0;
-    for (const inp of document.querySelectorAll("#sheetBody input[data-i]")) {
+    for (const inp of only ? [] : document.querySelectorAll("#sheetBody input[data-i]")) {
       const g = num(inp.value);
       if (!g || g <= 0 || g > 5000) continue;
       const x = d.items[inp.dataset.i], k = g / 100;
@@ -1945,11 +1980,13 @@ const actions = {
         kcal: x.kcal * k, p: x.p * k, f: x.f * k, c: x.c * k });
       n++; kc += x.kcal * k;
     }
-    if (!n && !kept.length) { toast("Укажи граммы"); return; }
-    ui.incomingFood = null; ui.day = day; ui.view = "diary";
+    if (!n && !kept.length && !keptP.length) { toast("Укажи граммы"); return; }
+    ui.incomingFood = null;
+    if (!only) { ui.day = day; ui.view = "diary"; }
     save(); closeSheet(); render();
-    const rec = kept.length ? `${kept.length > 1 ? "Рецепты сохранены" : `Рецепт «${kept[0]}» сохранён`} в «Мои рецепты». ` : "";
-    toast(n ? `${replaced ? "Заменил присланное раньше. " : ""}${rec}Добавлено: ${n} ${plural(n, ["продукт", "продукта", "продуктов"])}, ${r0(kc)} ккал` : rec);
+    const rec = (kept.length ? `${kept.length > 1 ? "Рецепты сохранены" : `Рецепт «${kept[0]}» сохранён`} в «Мои рецепты». ` : "")
+      + (keptP.length ? `${keptP.length > 1 ? `Сохранено в продукты: ${keptP.length}` : `«${keptP[0]}» — в твоих продуктах`}. ` : "");
+    toast(n ? `${replaced ? "Заменил присланное раньше. " : ""}${rec}Добавлено: ${n} ${plural(n, ["продукт", "продукта", "продуктов"])}, ${r0(kc)} ккал` : rec.trim());
   },
   async shareNorm() {
     const url = normLink();
@@ -2031,6 +2068,14 @@ const actions = {
   editEntry(el) {
     const e = (S.entries[ui.day] || []).find(x => x.id === el.dataset.id);
     if (e) gramsSheet(null, e.meal, e);
+  },
+  // запись без продукта (присланная или продукт удалён) — КБЖУ на 100 г себе в «Мои продукты»
+  keepEntry() {
+    const { entry, p } = ui.gctx;
+    const r = keepProduct(p);
+    entry.pid = r.prod.id;
+    save(); closeSheet(); render();
+    toast(r.how === "same" ? "Такой продукт у тебя уже есть" : `«${r.prod.name}» — в твоих продуктах`);
   },
   deleteEntry() {
     const { entry } = ui.gctx;
@@ -2245,6 +2290,9 @@ function render() {
   ui.today = dayKey();
   document.documentElement.dataset.skin = S.skin === "cookie" ? "cookie" : "green";
   if (!S.profile) ui.view = "setup";
+  // откуда пришли — для кнопки «назад» телефона
+  if (ui.shown && ui.shown !== ui.view && !ui.goingBack && S.profile) ui.trail = [...(ui.trail || []).filter(v => v !== ui.view), ui.shown].slice(-10);
+  ui.shown = ui.view; ui.goingBack = false;
   if (ui.view !== "setup") ui.onPick = null;
   const [view, mount] = VIEWS[ui.view];
   const root = $("#view");
@@ -2256,28 +2304,61 @@ function render() {
   // ссылка «Отправить мою норму»
   if (S.profile && location.hash.startsWith("#norm=") && $("#sheet").hidden) {
     const n = parseNormHash();
-    history.replaceState(null, "", location.pathname);
+    history.replaceState(history.state, "", location.pathname);
     if (n) incomingNormSheet(n); else toast("Ссылка с нормой повреждена");
   }
   // ссылка «Поделиться едой» (приём или день)
   if (S.profile && location.hash.startsWith("#food=") && $("#sheet").hidden) {
     const data = parseFoodHash();
-    history.replaceState(null, "", location.pathname);
+    history.replaceState(history.state, "", location.pathname);
     if (data) incomingFoodSheet(data); else toast("Ссылка на еду повреждена");
   }
   // ссылка «Отправить меню с порциями» из Корзины (basket.js)
   if (S.profile && location.hash.startsWith("#plan=") && $("#sheet").hidden && typeof parsePlanHash === "function") {
     const data = parsePlanHash();
-    history.replaceState(null, "", location.pathname);
+    history.replaceState(history.state, "", location.pathname);
     if (data) incomingPlanSheet(data); else toast("Ссылка на меню повреждена");
   }
   // ссылка «Поделиться рецептом»
   if (S.profile && location.hash.startsWith("#recipe=") && $("#sheet").hidden) {
     const data = parseRecipeHash();
-    history.replaceState(null, "", location.pathname);
+    history.replaceState(history.state, "", location.pathname);
     if (data) incomingRecipeSheet(data); else toast("Ссылка на рецепт повреждена");
   }
+  syncBackGuard();
 }
+
+/* ================= Кнопка «назад» телефона ================= */
+// Пока есть куда шагать, сверху истории лежит запасная запись: «назад» снимает её, а мы делаем шаг
+// внутри Хрума (закрыть лист → вернуться к рецепту → прошлая вкладка → дневник). На дневнике без
+// открытых листов запасной записи нет — «назад» сворачивает приложение.
+const canStepBack = () => !$("#sheet").hidden || (!!S.profile && ui.view !== "diary");
+// лист закрыли кнопкой, а не «назад» — убираем лишнюю запись, чтобы следующий «назад» сразу свернул
+function syncBackGuard() {
+  const top = history.state?.hrum === "guard";
+  if (canStepBack() && !top) history.pushState({ hrum: "guard" }, "", location.pathname);
+  else if (!canStepBack() && top && !ui.dropGuard) { ui.dropGuard = true; history.back(); }
+}
+function stepBack() {
+  if (!$("#sheet").hidden) {
+    const back = $('#sheetBody [data-a="rBack"]');
+    if (back) back.click(); else closeSheet();
+    return true;
+  }
+  if (!S.profile) return false;
+  const trail = (ui.trail || []).filter(v => v !== ui.view);
+  const to = trail.pop() || (ui.view !== "diary" ? "diary" : null);
+  if (!to) return false;
+  ui.trail = trail; ui.goingBack = true; ui.view = to;
+  if (to === "diary") ui.day = ui.day || dayKey();
+  render(); window.scrollTo(0, 0);
+  return true;
+}
+if (!history.state) history.replaceState({ hrum: "root" }, "", location.href);
+window.addEventListener("popstate", () => {
+  if (ui.dropGuard) { ui.dropGuard = false; syncBackGuard(); return; }
+  if (stepBack()) syncBackGuard();
+});
 
 window.addEventListener("beforeinstallprompt", e => {
   e.preventDefault();
