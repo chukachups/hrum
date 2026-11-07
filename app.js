@@ -225,9 +225,47 @@ function dayData(k) {
   const eaten = { kcal: 0, p: 0, f: 0, c: 0 };
   for (const e of es) for (const x in eaten) eaten[x] += e[x];
   const burned = ws.reduce((s, w) => s + w.kcal, 0);
-  const t = targets();
+  const plan = targets();
   // тренировки лимит не увеличивают — идут бонусом к дефициту
-  return { es, ws, eaten, burned, t, limit: t.kcal };
+  if (!isCheat(k)) return { es, ws, eaten, burned, t: plan, plan, limit: plan.kcal };
+  // Читмил: в этот день можно съесть до поддержания (без дефицита). Белок и жиры те же,
+  // лишнее — в углеводы: вкусное обычно сладкое и мучное
+  const kcal = cheatKcal(plan), t = { ...plan, kcal, c: plan.c + (kcal - plan.kcal) / 4 };
+  return { es, ws, eaten, burned, t, plan, limit: kcal, cheat: true };
+}
+
+/* Читмил-день: не чаще раза в неделю, лимит = поддержание веса */
+const isCheat = k => !!(S.cheat && S.cheat[k]);
+const cheatKcal = t => Math.max(t.tdee, t.kcal + 300);
+function cheatNear(k) { // другой читмил ближе недели
+  return Object.keys(S.cheat || {}).filter(x => x !== k && Math.abs((parseDay(x) - parseDay(k)) / 864e5) < 7).sort()[0];
+}
+function cheatSheet() {
+  const t = targets(), lim = cheatKcal(t), near = cheatNear(ui.day);
+  const deficit = t.tdee - t.kcal;
+  openSheet(`<h2>День читмила</h2>
+    <p class="small">Один свободный день в неделю — это нормально и даже полезно: легче держать режим остальные шесть дней,
+      меньше срывов. Плохо, если «свободный» день превращается в обжорство: за один вечер легко съесть 4–5 тысяч ккал
+      и перечеркнуть дефицит всей недели.</p>
+    <p class="small">Поэтому в Хруме читмил — это день <b>без дефицита</b>: лимит поднимается до поддержания веса,
+      <b>${r0(t.kcal)} → ${r0(lim)} ккал</b>. Ешь, что хочется, — пиццу, торт, бургер, — но в этих рамках:
+      вес не прибавится, просто неделя похудения станет чуть медленнее${deficit > 0 ? ` (−${r0(deficit)} ккал дефицита ≈ ${r0(deficit / 7.7)} г жира)` : ""}.</p>
+    <p class="muted small">Советы: записывай всё как обычно — это не «день без учёта». Белок оставь как в обычный день,
+      утром можно поесть полегче, а вкусное — на обед или ужин. Вес на следующее утро подскочит на 0,5–1 кг — это вода и соль,
+      за 2–3 дня уйдёт.</p>
+    ${near ? `<p class="small"><b>Внимание:</b> читмил уже есть — ${daySub(near)}. Лучше не чаще раза в неделю.</p>` : ""}
+    <button class="btn" data-a="setCheat">Сделать ${dayTitle(ui.day).toLowerCase()} днём читмила</button>`);
+}
+function cheatCard(d) {
+  if (!d.cheat) return `<button class="row-card dashed" data-a="cheat">${icon("cake", 18)} Сделать днём читмила</button>`;
+  const extra = d.eaten.kcal - d.plan.kcal;
+  const tip = d.eaten.kcal > d.limit
+    ? `Сверх поддержания на ${r0(d.eaten.kcal - d.limit)} ккал ≈ ${r0((d.eaten.kcal - d.limit) / 7.7)} г жира. Не страшно, если редко — завтра просто обычный день, без «наказания» голодом.`
+    : extra > 0 ? `Сверх обычной нормы ${r0(extra)} ккал — в рамках читмила, дефицит этого дня просто ноль.`
+    : `Можно съесть до ${r0(d.limit)} ккал — это поддержание веса, без дефицита.`;
+  return `<div class="card note-card cheat-card"><b>${icon("cake", 18)} День читмила</b>
+    <span class="muted small">${tip}</span>
+    <div class="btn-row"><button class="btn ghost" data-a="unsetCheat">Отменить читмил</button></div></div>`;
 }
 
 const KEYS = ["kcal", "p", "f", "c"];
@@ -498,6 +536,7 @@ async function fetchOFF(code) {
 /* ================= Иконки ================= */
 
 const ICONS = {
+  cake: '<path d="M4 21h16M5 21v-7a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2v7M5 16c2 1.5 3.5 1.5 5 0s3.5-1.5 5 0 3.5 1.5 4 0M12 12V8M12 5.5c.8-.8.8-1.7 0-2.5-.8.8-.8 1.7 0 2.5z"/>',
   diary: '<rect x="4" y="3" width="16" height="18" rx="3"/><path d="M8 8h8M8 12h8M8 16h5"/>',
   search: '<circle cx="11" cy="11" r="6"/><path d="M20 20l-4.5-4.5"/>',
   scan: '<path d="M4 8V5a1 1 0 0 1 1-1h3M16 4h3a1 1 0 0 1 1 1v3M20 16v3a1 1 0 0 1-1 1h-3M8 20H5a1 1 0 0 1-1-1v-3M8 8v8M11 8v8M14 8v8M17 8v8"/>',
@@ -593,7 +632,7 @@ function viewDiary() {
         <div class="center"><div class="big">${r0(Math.abs(left))}</div><div class="cap">${over ? "ккал сверх лимита" : "ккал осталось"}</div></div>
       </div>
       <div class="balance">
-        <div class="kv"><span>Норма</span><b>${r0(t.kcal)}</b></div>
+        <div class="kv"><span>${d.cheat ? "Читмил" : "Норма"}</span><b>${r0(t.kcal)}</b></div>
         <div class="kv"><span>Съедено</span><b>${r0(eaten.kcal)}</b></div>
         <hr>
         <div class="kv"><span>Спорт</span><b class="plus">${burned ? "−" + r0(burned) : "0"}</b></div>
@@ -612,6 +651,7 @@ function viewDiary() {
       <span>Цель <b>${GOALS[S.profile.goal][1].toLowerCase()}</b></span>
     </div>
   </section>
+  ${cheatCard(d)}
 
   <div class="section-title"><h2>Приёмы пищи</h2><span>${d.es.length ? d.es.length + " " + plural(d.es.length, ["запись", "записи", "записей"]) : "нажми +, чтобы добавить"}</span></div>
   ${meals}
@@ -684,7 +724,7 @@ function cookieBlock(d) {
       <div class="cookie" role="img" aria-label="${cap}">${cookieSvg(bites)}</div>
       <div class="balance">
         <div><div class="big ${over ? "over" : ""}">${r0(Math.abs(left))}</div><div class="cap">${over ? "ккал сверх лимита" : "ккал ещё можно съесть"}</div></div>
-        <div class="kv"><span>Норма</span><b>${r0(t.kcal)}</b></div>
+        <div class="kv"><span>${d.cheat ? "Читмил" : "Норма"}</span><b>${r0(t.kcal)}</b></div>
         <div class="kv"><span>Откушено</span><b>${r0(eaten.kcal)}</b></div>
         <div class="kv"><span>Спорт</span><b class="plus">${burned ? "−" + r0(burned) : "0"}</b></div>
       </div>
@@ -754,14 +794,14 @@ function productRows(list, action, q) {
 function viewProgress() {
   const t = targets();
   const days = Array.from({ length: 14 }, (_, i) => shiftDay(dayKey(), i - 13));
-  const data = days.map(k => { const d = dayData(k); return { k, eaten: d.eaten.kcal, limit: d.limit, burned: d.burned, has: d.es.length > 0 }; });
+  const data = days.map(k => { const d = dayData(k); return { k, eaten: d.eaten.kcal, limit: d.limit, cheat: d.cheat, burned: d.burned, has: d.es.length > 0 }; });
 
   // сегодняшний день ещё не закончен — в среднее не берём
   const last7 = data.slice(-8, -1).filter(x => x.has);
   let stats = `<p class="muted small">Записывай еду несколько дней — со следующего дня здесь появится средний дефицит и прогноз.</p>`;
   if (last7.length) {
     const avg = last7.reduce((s, x) => s + x.eaten, 0) / last7.length;
-    const bal = last7.reduce((s, x) => s + (x.limit - x.eaten + x.burned), 0) / last7.length;
+    const bal = last7.reduce((s, x) => s + (t.tdee - x.eaten + x.burned), 0) / last7.length;
     const sport = last7.reduce((s, x) => s + x.burned, 0) / last7.length;
     const kgWeek = bal * 7 / 7700;
     stats = `<div class="stats">
@@ -780,7 +820,7 @@ function viewProgress() {
   data.forEach((x, i) => {
     const bx = L + i * step + step * 0.2, bw = step * 0.6;
     if (x.eaten > 0) {
-      bars += `<rect x="${bx}" y="${y(x.eaten)}" width="${bw}" height="${y(0) - y(x.eaten)}" rx="3" fill="var(${x.eaten > x.limit ? "--danger" : "--accent"})"/>`;
+      bars += `<rect x="${bx}" y="${y(x.eaten)}" width="${bw}" height="${y(0) - y(x.eaten)}" rx="3" fill="var(${x.eaten > x.limit ? "--danger" : x.cheat ? "--fat" : "--accent"})"/>`;
     }
     if (i % 2 === 1) bars += `<text x="${bx + bw / 2}" y="${H - 6}" font-size="10" text-anchor="middle" fill="var(--muted)">${parseDay(x.k).getDate()}</text>`;
   });
@@ -817,7 +857,7 @@ function viewProgress() {
     <section class="card">${stats}</section>
     <div class="section-title"><h2>Точность нормы</h2><span>${S.profile.adjust && S.profile.adjust !== 1 ? `поправка ${S.profile.adjust > 1 ? "+" : "−"}${r0(Math.abs(S.profile.adjust - 1) * 100)}%` : "по динамике веса"}</span></div>
     <section class="card adjust">${adjustCard(adjustCalc())}</section>
-    <div class="section-title"><h2>Калории за 14 дней</h2><span>пунктир — норма</span></div>
+    <div class="section-title"><h2>Калории за 14 дней</h2><span>${data.some(x => x.cheat) ? "жёлтые — читмил, " : ""}пунктир — норма</span></div>
     <section class="card chart">${kcalChart}</section>
     <div class="section-title"><h2>Вес</h2><span>${pts.length ? pts.length + " " + plural(pts.length, ["запись", "записи", "записей"]) : ""}</span></div>
     <section class="card chart">${weightChart}</section>
@@ -2083,6 +2123,9 @@ const actions = {
     save(); closeSheet(); render(); toast("Удалено");
   },
   addWorkout() { workoutSheet(); },
+  cheat() { cheatSheet(); },
+  setCheat() { S.cheat = { ...(S.cheat || {}), [ui.day]: true }; save(); closeSheet(); render(); toast("Читмил! Приятного аппетита"); },
+  unsetCheat() { if (S.cheat) delete S.cheat[ui.day]; save(); render(); toast("Обычный день"); },
   saveWorkout() {
     const min = num($("#wMin").value);
     if (!min || min <= 0 || min > 600) { toast("Укажи минуты"); return; }

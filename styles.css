@@ -339,3 +339,6 @@ h2 { font-weight: 500; font-size: 17px; margin: 0; }
 .kv.check { align-items: center; justify-content: flex-start; padding: 4px 0; cursor: pointer; }
 .kv.check > span { flex: 1; color: var(--ink); }
 .kv.check input { width: 20px; height: 20px; margin: 0; accent-color: var(--accent); flex: none; }
+.cheat-card { border-color: var(--fat); }
+.cheat-card > b { display: flex; align-items: center; gap: 8px; }
+.cheat-card > b svg { color: var(--fat); }
