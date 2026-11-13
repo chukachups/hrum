@@ -1576,16 +1576,25 @@ function copyMealSheet(meal) {
   if (!items.length) return;
   const t = dayKey(), next = shiftDay(ui.day, 1);
   const def = next >= shiftDay(t, -7) && next <= shiftDay(t, PLAN_DAYS) ? next : t;
-  ui.copyCtx = { from: ui.day, meal };
-  const kc = items.reduce((s, e) => s + e.kcal, 0);
+  ui.copyCtx = { from: ui.day, meal, items };
   openSheet(`<div><h2>Копировать: ${mealName(meal).toLowerCase()}</h2>
-      <p class="muted small">${dayTitle(ui.day)} · ${items.length} ${plural(items.length, ["продукт", "продукта", "продуктов"])}, ${r0(kc)} ккал</p></div>
-    <div class="card form">${items.map(e => `<div class="kv"><span>${esc(e.name)}</span><b>${pieces(e)}${fmt(e.grams, 0)} г</b></div>`).join("")}</div>
+      <p class="muted small">${dayTitle(ui.day)}. Сними галочки с того, что копировать не нужно.</p></div>
+    <div class="card form" id="cList">${items.map((e, i) => `<label class="kv check"><input type="checkbox" data-i="${i}" checked>
+      <span>${esc(e.name)}</span><b>${pieces(e)}${fmt(e.grams, 0)} г</b></label>`).join("")}</div>
     <p class="muted small">На какой день:</p>
     <div class="chips days" id="cDay">${dayChips(def)}</div>
     <div class="seg" id="cMeal">${MEALS.map(([k, t]) => `<button data-a="pick" data-val="${k}" aria-pressed="${k === meal}">${t}</button>`).join("")}</div>
     <p class="note" id="cNote" hidden></p>
-    <button class="btn" data-a="doCopyMeal">Копировать</button>`);
+    <button class="btn" data-a="doCopyMeal" id="cGo">Копировать</button>`);
+  const upd = () => {
+    const sel = copyPicked(), kc = sel.reduce((s, e) => s + e.kcal, 0);
+    $("#cGo").disabled = !sel.length;
+    $("#cGo").textContent = !sel.length ? "Отметь продукты"
+      : sel.length === items.length ? `Копировать всё · ${r0(kc)} ккал`
+      : `Копировать ${sel.length} ${plural(sel.length, ["продукт", "продукта", "продуктов"])} · ${r0(kc)} ккал`;
+  };
+  $("#cList").addEventListener("change", upd);
+  upd();
   const note = () => {
     const day = $('#cDay [aria-pressed="true"]').dataset.val, m = $('#cMeal [aria-pressed="true"]').dataset.val;
     const el = $("#cNote");
@@ -1599,6 +1608,8 @@ function copyMealSheet(meal) {
   ui.onPick = note;
   $("#cDay [aria-pressed=true]")?.scrollIntoView({ inline: "center", block: "nearest" });
 }
+
+const copyPicked = () => [...document.querySelectorAll("#cList input:checked")].map(x => ui.copyCtx.items[+x.dataset.i]);
 
 // Блюдо готовили впервые и записали продуктами — отмеченные продукты приёма становятся ингредиентами
 // нового рецепта (граммы как в дневнике), дальше обычный редактор рецепта
@@ -1972,12 +1983,13 @@ const actions = {
     const { from, meal } = ui.copyCtx;
     const day = $('#cDay [aria-pressed="true"]').dataset.val, m = $('#cMeal [aria-pressed="true"]').dataset.val;
     if (day === from && m === meal) { toast("Выбери другой день или приём"); return; }
-    const items = (S.entries[from] || []).filter(e => e.meal === meal);
+    const items = copyPicked();
+    if (!items.length) { toast("Отметь продукты"); return; }
     for (const e of items) (S.entries[day] ||= []).push({ ...e, id: uid(), meal: m });
     const kc = items.reduce((s, e) => s + e.kcal, 0);
     ui.day = day;
     save(); closeSheet(); render();
-    toast(`Скопировано: ${mealName(m).toLowerCase()}, ${r0(kc)} ккал · на ${dayTitle(day).replace(/^[СВЗ]/, c => c.toLowerCase())}`);
+    toast(`Скопировано в ${mealName(m).toLowerCase()}: ${items.length} ${plural(items.length, ["продукт", "продукта", "продуктов"])}, ${r0(kc)} ккал · на ${dayTitle(day).replace(/^[СВЗ]/, c => c.toLowerCase())}`);
   },
   shareDay() { shareFood(null); },
   garnish(el) { garnishSheet(el.dataset.meal); },
